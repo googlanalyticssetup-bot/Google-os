@@ -60,7 +60,12 @@ class ThemeStudioWidgetProvider : AppWidgetProvider() {
       ids: IntArray,
       theme: ThemeSpec,
     ) {
-      val backdrop = ProceduralWallpaperRenderer.renderWidgetGlassBackdrop(theme)
+      val backdrop =
+        ProceduralWallpaperRenderer.renderWidgetGlassBackdrop(
+          theme = theme,
+          widthPx = 480,
+          heightPx = 220,
+        )
       try {
         val primaryColor = theme.palette.primaryHex.toInt()
         val textColor = theme.palette.onSurfaceHex.toInt()

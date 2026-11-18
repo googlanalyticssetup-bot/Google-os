@@ -108,6 +108,17 @@ fun HomeScreenView(
     onPageChanged(pagerState.currentPage)
   }
 
+  LaunchedEffect(state.currentPage) {
+    val target = state.currentPage.coerceIn(0, (settings.pageCount - 1).coerceAtLeast(0))
+    if (pagerState.currentPage != target && !pagerState.isScrollInProgress) {
+      if (state.renderRules.animationScale > 0f) {
+        pagerState.animateScrollToPage(target)
+      } else {
+        pagerState.scrollToPage(target)
+      }
+    }
+  }
+
   BoxWithConstraints(modifier = modifier.fillMaxSize()) {
     val isLargeScreen = maxWidth >= 600.dp || state.deviceCapabilities.formFactor != DeviceFormFactor.PHONE
     val effectiveCols =
@@ -435,7 +446,7 @@ fun HomeScreenView(
 
   // Widget Picker Modal (Built-in Glass Widgets + Real Android App Widgets)
   if (showWidgetPicker) {
-    val systemProviders = remember { LauncherSystemBridge.getInstalledAppWidgetProviders(context) }
+    val systemProviders = remember(showWidgetPicker) { LauncherSystemBridge.getInstalledAppWidgetProviders(context) }
     AlertDialog(
       onDismissRequest = { showWidgetPicker = false },
       title = { Text("Add Widget to Page ${pagerState.currentPage + 1}") },

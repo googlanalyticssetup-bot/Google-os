@@ -11,4 +11,7 @@
     <string name="cd_app_logo">Theme Studio Prism Icon</string>
     <string name="cd_wallpaper_preview">Generated procedural wallpaper preview</string>
     <string name="cd_fingerprint_pad">Interactive fingerprint visual effect test pad</string>
+    <string name="widget_unavailable">App Widget unavailable</string>
+    <string name="widget_default_pill">Premium Glass</string>
+    <string name="widget_default_status">Offline Studio • Ready</string>
 </resources>

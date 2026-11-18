@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.R
 import com.example.domain.model.DeviceCapabilities
 import com.example.domain.model.EffectiveRenderRules
 import com.example.domain.model.ThemeSpec
@@ -45,6 +46,9 @@ import com.example.ui.components.fontStyleToFamily
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LauncherHomeWidgetCard(
@@ -102,15 +106,20 @@ fun LauncherHomeWidgetCard(
         AndroidView(
           factory = { ctx ->
             val info = widgetHostHolder.appWidgetManager.getAppWidgetInfo(item.appWidgetId)
-            if (info != null) {
-              widgetHostHolder.appWidgetHost.createView(ctx, item.appWidgetId, info) as AppWidgetHostView
-            } else {
-              android.widget.TextView(ctx).apply {
-                text = "App Widget unavailable"
+            val hostView =
+              if (info != null) {
+                runCatching {
+                  widgetHostHolder.appWidgetHost.createView(ctx, item.appWidgetId, info) as AppWidgetHostView
+                }.getOrNull()
+              } else {
+                null
+              }
+            hostView
+              ?: android.widget.TextView(ctx).apply {
+                setText(R.string.widget_unavailable)
                 setTextColor(android.graphics.Color.WHITE)
                 setPadding(24, 24, 24, 24)
               }
-            }
           },
           modifier = Modifier.fillMaxSize().padding(4.dp),
         )
@@ -125,9 +134,15 @@ fun LauncherHomeWidgetCard(
       ) {
         when (kind) {
           CustomWidgetKind.CLOCK -> {
-            val now = remember { Date() }
-            val timeStr = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(now) }
-            val dateStr = remember { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now) }
+            var now by remember { mutableStateOf(Date()) }
+            LaunchedEffect(Unit) {
+              while (true) {
+                delay(15_000L)
+                now = Date()
+              }
+            }
+            val timeStr = remember(now) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(now) }
+            val dateStr = remember(now) { SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now) }
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.SpaceBetween,
@@ -287,13 +302,25 @@ fun LauncherHomeWidgetCard(
           CustomWidgetKind.PHOTO -> {
             var photoBmp by remember(item.photoUri) { mutableStateOf<ImageBitmap?>(null) }
             LaunchedEffect(item.photoUri) {
-              item.photoUri?.let { uri ->
-                runCatching {
-                  context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
-                    photoBmp = BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                  }
+              val uri = item.photoUri ?: return@LaunchedEffect
+              photoBmp =
+                withContext(Dispatchers.IO) {
+                  runCatching {
+                    val parsed = Uri.parse(uri)
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(parsed)?.use { s ->
+                      BitmapFactory.decodeStream(s, null, bounds)
+                    }
+                    var sample = 1
+                    while (bounds.outWidth / sample > 720 || bounds.outHeight / sample > 720) {
+                      sample *= 2
+                    }
+                    val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                    context.contentResolver.openInputStream(parsed)?.use { s ->
+                      BitmapFactory.decodeStream(s, null, opts)?.asImageBitmap()
+                    }
+                  }.getOrNull()
                 }
-              }
             }
             Box(
               modifier =
@@ -423,7 +450,7 @@ private fun SmallCircleBadgeButton(
     shape = CircleShape,
     color = Color.Black.copy(alpha = 0.72f),
     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
-    modifier = Modifier.size(32.dp),
+    modifier = Modifier.size(38.dp),
   ) {
     Box(contentAlignment = Alignment.Center) {
       Icon(icon, contentDescription = contentDescription, tint = Color.White, modifier = Modifier.size(16.dp))

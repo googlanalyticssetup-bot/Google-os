@@ -30,6 +30,7 @@ import com.example.launcher.system.LauncherSystemBridge
 import com.example.launcher.ui.LauncherUiState
 import com.example.ui.components.GlassSurfaceCard
 import com.example.ui.components.PaletteSwatchRow
+import java.util.Locale
 
 @Composable
 fun SettingsSectionDetailContent(
@@ -307,7 +308,7 @@ fun SettingsSectionDetailContent(
             }
           }
         }
-        Text("Animation Speed (${String.format("%.1f", settings.animationSpeed)}×)")
+        Text("Animation Speed (${String.format(Locale.US, "%.1f", settings.animationSpeed)}×)")
         Slider(
           value = settings.animationSpeed,
           onValueChange = { v -> onUpdateSettings { it.copy(animationSpeed = v) } },

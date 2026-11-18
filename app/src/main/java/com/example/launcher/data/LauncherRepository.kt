@@ -209,6 +209,7 @@ class LauncherRepository(private val context: Context) {
         dao.upsertHomeItems(payload.homeItems.map { it.toEntity() })
         payload.activeTheme?.let { theme ->
           themeRepository.setActiveTheme(theme)
+          prefs.updateSettings { it.copy(activeThemeId = theme.id, fontStyle = theme.fontStyle) }
         }
         "Restored ${payload.homeItems.size} home items and launcher settings"
       }

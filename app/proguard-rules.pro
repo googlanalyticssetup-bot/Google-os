@@ -1,21 +1,17 @@
 # Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Keep Room database, entities, and DAOs
+-keep class * extends androidx.room.RoomDatabase
+-keep @androidx.room.Entity class *
+-dontwarn androidx.room.paging.**
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Keep Android AppWidgetProvider and DeviceAdminReceiver components declared in AndroidManifest.xml
+-keep public class com.example.widget.ThemeStudioWidgetProvider { *; }
+-keep public class com.example.launcher.system.LauncherDeviceAdminReceiver { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep domain and launcher data models
+-keep class com.example.domain.model.** { *; }
+-keep class com.example.launcher.model.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep line numbers for stack traces if minification is enabled
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

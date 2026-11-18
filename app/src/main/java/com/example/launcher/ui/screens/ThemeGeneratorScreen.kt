@@ -261,7 +261,7 @@ private fun PaletteTokenSwatch(label: String, hex: Long) {
     Spacer(Modifier.height(4.dp))
     Text(label, style = MaterialTheme.typography.labelSmall)
     Text(
-      text = String.format("#%06X", (hex and 0xFFFFFF)),
+      text = String.format(Locale.US, "#%06X", (hex and 0xFFFFFF)),
       style = MaterialTheme.typography.labelSmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

@@ -1,5 +1,6 @@
 package com.example.launcher.system
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
@@ -22,6 +23,8 @@ import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import com.example.launcher.model.AppCategory
 import com.example.launcher.model.InstalledAppInfo
 import kotlinx.coroutines.Dispatchers
@@ -197,10 +200,11 @@ object AppCatalogLoader {
             val idIdx = cursor.getColumnIndex(ContactsContract.Contacts._ID)
             val nameIdx = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)
             val keyIdx = cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY)
+            if (idIdx < 0 || nameIdx < 0) return@use
             while (cursor.moveToNext() && matches.size < 6) {
               val id = cursor.getString(idIdx) ?: continue
               val name = cursor.getString(nameIdx) ?: continue
-              val lookupKey = cursor.getString(keyIdx)
+              val lookupKey = if (keyIdx >= 0) cursor.getString(keyIdx) else null
               val uri =
                 if (lookupKey != null) {
                   ContactsContract.Contacts.getLookupUri(id.toLongOrNull() ?: 0L, lookupKey)
@@ -212,6 +216,7 @@ object AppCatalogLoader {
       matches
     }
 
+  @SuppressLint("SwitchIntDef")
   private fun classifyApp(info: ApplicationInfo, pkg: String, label: String): AppCategory {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       when (info.category) {
@@ -222,6 +227,7 @@ object AppCatalogLoader {
         -> return AppCategory.MEDIA
         ApplicationInfo.CATEGORY_SOCIAL -> return AppCategory.SOCIAL
         ApplicationInfo.CATEGORY_PRODUCTIVITY -> return AppCategory.PRODUCTIVITY
+        else -> {}
       }
     }
     val lower = "$pkg $label".lowercase()
@@ -247,12 +253,12 @@ object AppCatalogLoader {
   }
 
   private fun drawableToScaledBitmap(drawable: Drawable, targetSize: Int): Bitmap {
-    if (drawable is BitmapDrawable && drawable.bitmap != null) {
+    if (drawable is BitmapDrawable && drawable.bitmap != null && !drawable.bitmap.isRecycled) {
       val src = drawable.bitmap
       if (src.width <= targetSize && src.height <= targetSize) return src
-      return Bitmap.createScaledBitmap(src, targetSize, targetSize, true)
+      return src.scale(targetSize, targetSize, true)
     }
-    val bitmap = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+    val bitmap = createBitmap(targetSize, targetSize)
     val canvas = Canvas(bitmap)
     drawable.setBounds(0, 0, canvas.width, canvas.height)
     drawable.draw(canvas)

@@ -77,17 +77,13 @@ object ProceduralWallpaperRenderer {
         val bitmap = renderWallpaperBitmap(theme, rules, w, h)
         try {
           val wm = WallpaperManager.getInstance(context.applicationContext)
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val flag =
-              when (target) {
-                WallpaperTarget.HOME -> WallpaperManager.FLAG_SYSTEM
-                WallpaperTarget.LOCK -> WallpaperManager.FLAG_LOCK
-                WallpaperTarget.BOTH -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
-              }
-            wm.setBitmap(bitmap, null, true, flag)
-          } else {
-            wm.setBitmap(bitmap)
-          }
+          val flag =
+            when (target) {
+              WallpaperTarget.HOME -> WallpaperManager.FLAG_SYSTEM
+              WallpaperTarget.LOCK -> WallpaperManager.FLAG_LOCK
+              WallpaperTarget.BOTH -> WallpaperManager.FLAG_SYSTEM or WallpaperManager.FLAG_LOCK
+            }
+          wm.setBitmap(bitmap, null, true, flag)
           "Applied ${theme.name} wallpaper to ${target.label}"
         } finally {
           if (!bitmap.isRecycled) bitmap.recycle()

@@ -80,6 +80,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     MutableStateFlow("ColorOS 7 frosted cyan and luminous violet glass with deep obsidian dock")
   private val _themeGenResult = MutableStateFlow<GeneratedPaletteResult?>(null)
   private val _statusMessage = MutableStateFlow<String?>(null)
+  private val _isDefaultHome =
+    MutableStateFlow(LauncherSystemBridge.isDefaultHomeLauncher(application))
+  private val _isDeviceAdminActive =
+    MutableStateFlow(LauncherSystemBridge.isDeviceAdminActive(application))
 
   private var wallpaperLoadJob: Job? = null
   private var contactSearchJob: Job? = null
@@ -137,6 +141,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
       _themeGenPrompt,
       _themeGenResult,
       _statusMessage,
+      _isDefaultHome,
+      _isDeviceAdminActive,
     ) { vals ->
       SystemBundle(
         page = vals[0] as Int,
@@ -146,6 +152,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         genPrompt = vals[4] as String,
         genResult = vals[5] as GeneratedPaletteResult?,
         status = vals[6] as String?,
+        isDefaultHome = vals[7] as Boolean,
+        isDeviceAdmin = vals[8] as Boolean,
       )
     }
 
@@ -187,8 +195,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         wallpaperBitmap = sys.wpBitmap,
         deviceCapabilities = sys.caps,
         renderRules = rules,
-        isDefaultHome = LauncherSystemBridge.isDefaultHomeLauncher(ctx),
-        isDeviceAdminActive = LauncherSystemBridge.isDeviceAdminActive(ctx),
+        isDefaultHome = sys.isDefaultHome,
+        isDeviceAdminActive = sys.isDeviceAdmin,
         isSpeechAvailable = LauncherSystemBridge.isSpeechRecognitionAvailable(ctx),
         isForeground = sys.fg,
         themeGenPrompt = sys.genPrompt,
@@ -239,7 +247,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
   fun refreshCapabilitiesAndApps() {
     viewModelScope.launch {
-      _capabilities.value = HardwareCapabilityEngine.inspectDevice(getApplication())
+      val ctx = getApplication<Application>()
+      _capabilities.value = HardwareCapabilityEngine.inspectDevice(ctx)
+      _isDefaultHome.value = LauncherSystemBridge.isDefaultHomeLauncher(ctx)
+      _isDeviceAdminActive.value = LauncherSystemBridge.isDeviceAdminActive(ctx)
       _installedApps.value = repo.loadApps()
     }
   }
@@ -696,5 +707,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     val genPrompt: String,
     val genResult: GeneratedPaletteResult?,
     val status: String?,
+    val isDefaultHome: Boolean,
+    val isDeviceAdmin: Boolean,
   )
 }
