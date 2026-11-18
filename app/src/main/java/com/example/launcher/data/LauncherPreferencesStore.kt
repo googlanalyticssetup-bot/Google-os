@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.domain.model.FontStyleOption
 import com.example.domain.model.PerformanceMode
+import com.example.domain.model.TileShape
 import com.example.launcher.model.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -41,6 +42,10 @@ class LauncherPreferencesStore(private val context: Context) {
   companion object {
     fun encodeSettings(s: LauncherSettings): String {
       val o = JSONObject()
+      o.put("onboardingCompleted", s.onboardingCompleted)
+      o.put("zeroScreenEnabled", s.zeroScreenEnabled)
+      o.put("dynamicCapsuleEnabled", s.dynamicCapsuleEnabled)
+
       o.put("gridColumns", s.gridColumns)
       o.put("gridRows", s.gridRows)
       o.put("pageCount", s.pageCount)
@@ -65,6 +70,7 @@ class LauncherPreferencesStore(private val context: Context) {
 
       o.put("defaultWidgetsGlass", s.defaultWidgetsGlass)
       o.put("defaultWidgetsTransparent", s.defaultWidgetsTransparent)
+      o.put("weatherCityNote", s.weatherCityNote)
 
       o.put("defaultFolderStyle", s.defaultFolderStyle.name)
       o.put("defaultFolderLayout", s.defaultFolderLayout.name)
@@ -80,6 +86,11 @@ class LauncherPreferencesStore(private val context: Context) {
       o.put("animationsEnabled", s.animationsEnabled)
       o.put("pageTransition", s.pageTransition.name)
       o.put("animationSpeed", s.animationSpeed.toDouble())
+      o.put("glassBlurStrength", s.glassBlurStrength.toDouble())
+      o.put("glassTransparency", s.glassTransparency.toDouble())
+      o.put("glassBorderReflection", s.glassBorderReflection.toDouble())
+      o.put("glassShadowDepth", s.glassShadowDepth.toDouble())
+      if (s.customAccentHex != null) o.put("customAccentHex", s.customAccentHex)
 
       if (s.customWallpaperUri != null) o.put("customWallpaperUri", s.customWallpaperUri)
 
@@ -100,12 +111,41 @@ class LauncherPreferencesStore(private val context: Context) {
       o.put("performanceMode", s.performanceMode.name)
 
       o.put("hiddenPackages", JSONArray(s.hiddenPackages.toList()))
+      o.put("lockedPackages", JSONArray(s.lockedPackages.toList()))
+      if (s.vaultPinHash != null) o.put("vaultPinHash", s.vaultPinHash)
+      val webAppsArr = JSONArray()
+      s.isolatedWebApps.forEach { w ->
+        webAppsArr.put(
+          JSONObject()
+            .put("id", w.id)
+            .put("title", w.title)
+            .put("url", w.url)
+            .put("isolateCookies", w.isolateCookies)
+            .put("accentHex", w.accentHex),
+        )
+      }
+      o.put("isolatedWebApps", webAppsArr)
+
       o.put("customAppLabels", JSONObject(s.customAppLabels))
       o.put(
         "customAppIconStyles",
         JSONObject(s.customAppIconStyles.mapValues { it.value.name }),
       )
       o.put("customSortOrder", JSONArray(s.customSortOrder))
+
+      val ccArr = JSONArray()
+      s.controlCenterTiles.forEach { t ->
+        ccArr.put(
+          JSONObject()
+            .put("id", t.id.name)
+            .put("visible", t.visible)
+            .put("size", t.size.name),
+        )
+      }
+      o.put("controlCenterTiles", ccArr)
+      o.put("controlCenterTileShape", s.controlCenterTileShape.name)
+      if (s.controlCenterAccentHex != null) o.put("controlCenterAccentHex", s.controlCenterAccentHex)
+
       o.put("autoAdaptLargeScreen", s.autoAdaptLargeScreen)
       o.put("tabletColumnBoost", s.tabletColumnBoost)
       o.put("tabletDrawerColumnBoost", s.tabletDrawerColumnBoost)
@@ -117,7 +157,10 @@ class LauncherPreferencesStore(private val context: Context) {
         val o = JSONObject(json)
         val dockArr = o.optJSONArray("dockPackages") ?: JSONArray()
         val hiddenArr = o.optJSONArray("hiddenPackages") ?: JSONArray()
+        val lockedArr = o.optJSONArray("lockedPackages") ?: JSONArray()
         val sortArr = o.optJSONArray("customSortOrder") ?: JSONArray()
+        val webAppsArr = o.optJSONArray("isolatedWebApps")
+        val ccTilesArr = o.optJSONArray("controlCenterTiles")
         val labelsObj = o.optJSONObject("customAppLabels") ?: JSONObject()
         val iconStylesObj = o.optJSONObject("customAppIconStyles") ?: JSONObject()
 
@@ -130,7 +173,49 @@ class LauncherPreferencesStore(private val context: Context) {
           LauncherIconStyle.entries.firstOrNull { it.name == v }?.let { stylesMap[k] = it }
         }
 
+        val webApps =
+          if (webAppsArr != null) {
+            (0 until webAppsArr.length()).mapNotNull { idx ->
+              val wo = webAppsArr.optJSONObject(idx) ?: return@mapNotNull null
+              val url = wo.optString("url", "")
+              if (url.isBlank()) return@mapNotNull null
+              IsolatedWebApp(
+                id = wo.optString("id", "web_$idx"),
+                title = wo.optString("title", "Web App"),
+                url = url,
+                isolateCookies = wo.optBoolean("isolateCookies", true),
+                accentHex = wo.optLong("accentHex", 0xFF38BDF8L),
+              )
+            }
+          } else {
+            emptyList()
+          }
+
+        val ccTiles =
+          if (ccTilesArr != null && ccTilesArr.length() > 0) {
+            val parsed =
+              (0 until ccTilesArr.length()).mapNotNull { idx ->
+                val to = ccTilesArr.optJSONObject(idx) ?: return@mapNotNull null
+                val tileId =
+                  ControlCenterTileId.entries.firstOrNull { it.name == to.optString("id") }
+                    ?: return@mapNotNull null
+                ControlCenterTileConfig(
+                  id = tileId,
+                  visible = to.optBoolean("visible", true),
+                  size = enumOr(to.optString("size"), ControlCenterTileSize.COMPACT_1X1),
+                )
+              }
+            val missing =
+              defaultControlCenterTiles().filter { def -> parsed.none { it.id == def.id } }
+            (parsed + missing).distinctBy { it.id }
+          } else {
+            defaultControlCenterTiles()
+          }
+
         LauncherSettings(
+          onboardingCompleted = o.optBoolean("onboardingCompleted", false),
+          zeroScreenEnabled = o.optBoolean("zeroScreenEnabled", true),
+          dynamicCapsuleEnabled = o.optBoolean("dynamicCapsuleEnabled", true),
           gridColumns = o.optInt("gridColumns", 4).coerceIn(3, 8),
           gridRows = o.optInt("gridRows", 5).coerceIn(4, 8),
           pageCount = o.optInt("pageCount", 2).coerceIn(1, 7),
@@ -146,17 +231,18 @@ class LauncherPreferencesStore(private val context: Context) {
           drawerGlassEffect = o.optBoolean("drawerGlassEffect", true),
           drawerShowRecentFrequent = o.optBoolean("drawerShowRecentFrequent", true),
           drawerShowCategories = o.optBoolean("drawerShowCategories", true),
-          iconStyle = enumOr(o.optString("iconStyle"), LauncherIconStyle.COLOROS),
+          iconStyle = enumOr(o.optString("iconStyle"), LauncherIconStyle.LIQUID_GLASS),
           iconCornerPercent = o.optInt("iconCornerPercent", 34).coerceIn(8, 50),
           iconShadowEnabled = o.optBoolean("iconShadowEnabled", true),
           showDrawerLabels = o.optBoolean("showDrawerLabels", true),
           defaultWidgetsGlass = o.optBoolean("defaultWidgetsGlass", true),
           defaultWidgetsTransparent = o.optBoolean("defaultWidgetsTransparent", false),
+          weatherCityNote = o.optString("weatherCityNote", "Local Offline Mode"),
           defaultFolderStyle = enumOr(o.optString("defaultFolderStyle"), FolderStyle.GLASS),
           defaultFolderLayout = enumOr(o.optString("defaultFolderLayout"), FolderLayout.GRID),
           defaultFolderColorHex = o.optLong("defaultFolderColorHex", 0xFF8B5CF6),
           swipeUpAction = enumOr(o.optString("swipeUpAction"), GestureAction.OPEN_DRAWER),
-          swipeDownAction = enumOr(o.optString("swipeDownAction"), GestureAction.OPEN_NOTIFICATIONS),
+          swipeDownAction = enumOr(o.optString("swipeDownAction"), GestureAction.OPEN_CONTROL_CENTER),
           doubleTapAction = enumOr(o.optString("doubleTapAction"), GestureAction.LOCK_SCREEN),
           twoFingerSwipeAction = enumOr(o.optString("twoFingerSwipeAction"), GestureAction.OPEN_THEME_GENERATOR),
           pinchAction = enumOr(o.optString("pinchAction"), GestureAction.OPEN_EDIT_MODE),
@@ -164,6 +250,11 @@ class LauncherPreferencesStore(private val context: Context) {
           animationsEnabled = o.optBoolean("animationsEnabled", true),
           pageTransition = enumOr(o.optString("pageTransition"), PageTransitionEffect.SILK_SLIDE),
           animationSpeed = o.optDouble("animationSpeed", 1.0).toFloat(),
+          glassBlurStrength = o.optDouble("glassBlurStrength", 0.68).toFloat().coerceIn(0f, 1f),
+          glassTransparency = o.optDouble("glassTransparency", 0.24).toFloat().coerceIn(0.08f, 0.85f),
+          glassBorderReflection = o.optDouble("glassBorderReflection", 0.44).toFloat().coerceIn(0f, 1f),
+          glassShadowDepth = o.optDouble("glassShadowDepth", 0.52).toFloat().coerceIn(0f, 1f),
+          customAccentHex = if (o.has("customAccentHex")) o.optLong("customAccentHex") else null,
           customWallpaperUri = o.optString("customWallpaperUri", "").ifBlank { null },
           instantSearch = o.optBoolean("instantSearch", true),
           showSearchSuggestions = o.optBoolean("showSearchSuggestions", true),
@@ -179,9 +270,16 @@ class LauncherPreferencesStore(private val context: Context) {
           wallpaperBasedPalette = o.optBoolean("wallpaperBasedPalette", false),
           performanceMode = enumOr(o.optString("performanceMode"), PerformanceMode.AUTO),
           hiddenPackages = (0 until hiddenArr.length()).map { hiddenArr.getString(it) }.toSet(),
+          lockedPackages = (0 until lockedArr.length()).map { lockedArr.getString(it) }.toSet(),
+          vaultPinHash = o.optString("vaultPinHash", "").ifBlank { null },
+          isolatedWebApps = webApps,
           customAppLabels = labelsMap,
           customAppIconStyles = stylesMap,
           customSortOrder = (0 until sortArr.length()).map { sortArr.getString(it) },
+          controlCenterTiles = ccTiles,
+          controlCenterTileShape = enumOr(o.optString("controlCenterTileShape"), TileShape.SQUIRCLE),
+          controlCenterAccentHex =
+            if (o.has("controlCenterAccentHex")) o.optLong("controlCenterAccentHex") else null,
           autoAdaptLargeScreen = o.optBoolean("autoAdaptLargeScreen", true),
           tabletColumnBoost = o.optInt("tabletColumnBoost", 2).coerceIn(0, 3),
           tabletDrawerColumnBoost = o.optInt("tabletDrawerColumnBoost", 2).coerceIn(0, 3),

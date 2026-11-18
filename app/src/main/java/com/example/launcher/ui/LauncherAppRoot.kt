@@ -3,7 +3,9 @@ package com.example.launcher.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -18,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.launcher.model.GestureAction
 import com.example.launcher.model.HomeItem
@@ -25,12 +28,9 @@ import com.example.launcher.model.InstalledAppInfo
 import com.example.launcher.model.SettingsSection
 import com.example.launcher.system.LauncherSystemBridge
 import com.example.launcher.system.LauncherWidgetHostHolder
-import com.example.launcher.ui.components.AppDrawerOverlay
-import com.example.launcher.ui.components.AppQuickActionDialog
-import com.example.launcher.ui.components.FolderModalDialog
-import com.example.launcher.ui.screens.HomeScreenView
-import com.example.launcher.ui.screens.LauncherSettingsScreen
-import com.example.launcher.ui.screens.ThemeGeneratorScreen
+import com.example.launcher.ui.components.*
+import com.example.launcher.ui.screens.*
+import com.example.ui.components.FluidMotionSpecs
 import com.example.ui.theme.ThemeStudioTheme
 
 @Composable
@@ -58,12 +58,14 @@ fun LauncherAppRoot(
   val executeGesture: (GestureAction) -> Unit = { action ->
     when (action) {
       GestureAction.OPEN_DRAWER -> viewModel.openDrawer(true)
+      GestureAction.OPEN_CONTROL_CENTER -> viewModel.openControlCenter(true)
+      GestureAction.OPEN_ZERO_SCREEN -> {
+        if (state.settings.zeroScreenEnabled) viewModel.openZeroScreen(true)
+        else viewModel.openDrawer(true)
+      }
       GestureAction.OPEN_NOTIFICATIONS -> {
         val ok = LauncherSystemBridge.tryExpandNotificationShade(context)
-        if (!ok) {
-          // Graceful fallback: open search/drawer or notify user transparently
-          viewModel.openDrawer(true)
-        }
+        if (!ok) viewModel.openControlCenter(true)
       }
       GestureAction.LOCK_SCREEN -> {
         val locked = LauncherSystemBridge.tryLockScreen(context)
@@ -74,8 +76,9 @@ fun LauncherAppRoot(
       GestureAction.OPEN_EDIT_MODE -> viewModel.setEditMode(true)
       GestureAction.OPEN_SEARCH -> viewModel.openDrawer(true)
       GestureAction.OPEN_THEME_GENERATOR -> viewModel.navigateTo(LauncherDestination.THEME_GENERATOR)
-      GestureAction.OPEN_SETTINGS ->
-        viewModel.navigateTo(LauncherDestination.SETTINGS, null)
+      GestureAction.OPEN_CLONER_VAULT -> viewModel.navigateTo(LauncherDestination.CLONER_VAULT)
+      GestureAction.OPEN_LOCK_DESIGNER -> viewModel.navigateTo(LauncherDestination.LOCK_DESIGNER)
+      GestureAction.OPEN_SETTINGS -> viewModel.navigateTo(LauncherDestination.SETTINGS, null)
       GestureAction.NEXT_PAGE -> {
         val next = (state.currentPage + 1) % state.settings.pageCount.coerceAtLeast(1)
         viewModel.setCurrentPage(next)
@@ -106,10 +109,27 @@ fun LauncherAppRoot(
               ),
             )
             .padding(
-              bottom = if (state.destination == LauncherDestination.HOME) 0.dp else innerPadding.calculateBottomPadding(),
+              bottom =
+                if (state.destination == LauncherDestination.HOME ||
+                  state.destination == LauncherDestination.ONBOARDING
+                ) {
+                  0.dp
+                } else {
+                  innerPadding.calculateBottomPadding()
+                },
             ),
       ) {
         when (state.destination) {
+          LauncherDestination.ONBOARDING -> {
+            OnboardingScreen(
+              state = state,
+              onActivateTheme = viewModel::activateExistingTheme,
+              onUpdateSettings = viewModel::updateSettings,
+              onRefreshSystemStatus = viewModel::refreshCapabilitiesAndApps,
+              onComplete = viewModel::completeOnboarding,
+            )
+          }
+
           LauncherDestination.HOME -> {
             HomeScreenView(
               state = state,
@@ -135,19 +155,31 @@ fun LauncherAppRoot(
               onRemoveLastPage = viewModel::removeLastHomePage,
               onOpenThemeGenerator = { viewModel.navigateTo(LauncherDestination.THEME_GENERATOR) },
               onOpenSettings = { sec -> viewModel.navigateTo(LauncherDestination.SETTINGS, sec) },
+              onOpenControlCenter = { viewModel.openControlCenter(true) },
+              onOpenZeroScreen = { viewModel.openZeroScreen(true) },
+              onOpenClonerVault = { viewModel.navigateTo(LauncherDestination.CLONER_VAULT) },
+              onToggleCapsuleExpand = viewModel::toggleCapsuleExpanded,
+              onToggleStopwatch = viewModel::startOrPauseStopwatch,
+              onResetStopwatch = viewModel::resetStopwatch,
               onShowMessage = { /* snackbar via viewModel */ },
             )
           }
+
           LauncherDestination.THEME_GENERATOR -> {
             ThemeGeneratorScreen(
               state = state,
               onPromptChange = viewModel::updateThemeGenPrompt,
               onGeneratePalette = { p -> viewModel.generateThemePaletteFromText(p) },
+              onGenerateGeminiRecommendations = { p -> viewModel.generateGeminiRecommendations(p) },
+              onGenerateOfflineRecommendations = { p -> viewModel.generateOfflineRecommendations(p) },
+              onAskAiQuestion = viewModel::askAiQuestion,
+              onApplyThemeSpec = viewModel::applyThemeSpec,
               onApplyPalette = viewModel::applyGeneratedTheme,
               onExtractFromWallpaper = viewModel::extractThemeFromCurrentWallpaper,
               onBack = { viewModel.navigateTo(LauncherDestination.HOME) },
             )
           }
+
           LauncherDestination.SETTINGS -> {
             LauncherSettingsScreen(
               state = state,
@@ -155,6 +187,13 @@ fun LauncherAppRoot(
               onUpdateSettings = viewModel::updateSettings,
               onActivateTheme = viewModel::activateExistingTheme,
               onOpenThemeGenerator = { viewModel.navigateTo(LauncherDestination.THEME_GENERATOR) },
+              onOpenLockDesigner = { viewModel.navigateTo(LauncherDestination.LOCK_DESIGNER) },
+              onOpenClonerVault = { viewModel.navigateTo(LauncherDestination.CLONER_VAULT) },
+              onOpenControlCenter = {
+                viewModel.navigateTo(LauncherDestination.HOME)
+                viewModel.openControlCenter(true)
+              },
+              onReplayOnboarding = viewModel::replayOnboarding,
               onPickWallpaperPhoto = viewModel::setCustomPhotoWallpaper,
               onApplyWallpaperToSystem = viewModel::applyCurrentWallpaperToSystem,
               onExtractThemeFromWallpaper = viewModel::extractThemeFromCurrentWallpaper,
@@ -170,14 +209,49 @@ fun LauncherAppRoot(
               onBack = { viewModel.navigateTo(LauncherDestination.HOME) },
             )
           }
+
+          LauncherDestination.CLONER_VAULT -> {
+            ClonerVaultScreen(
+              state = state,
+              onToggleLockPackage = viewModel::toggleLockedPackage,
+              onSetVaultPin = viewModel::setVaultPin,
+              onToggleHiddenPackage = viewModel::setAppHidden,
+              onLaunchApp = viewModel::launchApp,
+              onAddIsolatedWebApp = viewModel::addIsolatedWebApp,
+              onRemoveIsolatedWebApp = viewModel::removeIsolatedWebApp,
+              onOpenIsolatedWebApp = viewModel::openIsolatedWebApp,
+              onBack = { viewModel.navigateTo(LauncherDestination.HOME) },
+            )
+          }
+
+          LauncherDestination.LOCK_DESIGNER -> {
+            LockScreenDesignerScreen(
+              state = state,
+              onUpdateTheme = viewModel::updateThemeLockAndStyle,
+              onApplyLockWallpaper = viewModel::applyCurrentWallpaperToSystem,
+              onBack = { viewModel.navigateTo(LauncherDestination.HOME) },
+            )
+          }
         }
 
-        // Animated App Drawer Overlay (instant in Lite Mode)
-        val drawerAnimEnabled = state.renderRules.animationScale > 0f && state.isForeground
+        val animEnabled = state.renderRules.animationScale > 0f && state.isForeground
+        val speed = state.settings.animationSpeed
+
+        // Animated App Drawer Overlay (Swipe Up)
         AnimatedVisibility(
           visible = state.isDrawerOpen && state.destination == LauncherDestination.HOME,
-          enter = if (drawerAnimEnabled) slideInVertically { it / 3 } + fadeIn() else fadeIn(),
-          exit = if (drawerAnimEnabled) slideOutVertically { it / 3 } + fadeOut() else fadeOut(),
+          enter =
+            if (animEnabled) {
+              slideInVertically(FluidMotionSpecs.offsetSpring(speed)) { it / 3 } + fadeIn()
+            } else {
+              fadeIn()
+            },
+          exit =
+            if (animEnabled) {
+              slideOutVertically(FluidMotionSpecs.offsetSpring(speed)) { it / 3 } + fadeOut()
+            } else {
+              fadeOut()
+            },
         ) {
           AppDrawerOverlay(
             state = state,
@@ -194,6 +268,83 @@ fun LauncherAppRoot(
               viewModel.openDrawer(false)
               viewModel.navigateTo(LauncherDestination.THEME_GENERATOR)
             },
+            onCreateFolderFromDrawer = { title, apps ->
+              viewModel.createFolderOnHome(title, apps, state.currentPage)
+            },
+            onOpenClonerVault = {
+              viewModel.openDrawer(false)
+              viewModel.navigateTo(LauncherDestination.CLONER_VAULT)
+            },
+          )
+        }
+
+        // Animated Control Center Overlay (Swipe Down)
+        AnimatedVisibility(
+          visible = state.isControlCenterOpen && state.destination == LauncherDestination.HOME,
+          enter =
+            if (animEnabled) {
+              slideInVertically(FluidMotionSpecs.offsetSpring(speed)) { -it } + fadeIn()
+            } else {
+              fadeIn()
+            },
+          exit =
+            if (animEnabled) {
+              slideOutVertically(FluidMotionSpecs.offsetSpring(speed)) { -it } + fadeOut()
+            } else {
+              fadeOut()
+            },
+        ) {
+          ControlCenterOverlay(
+            state = state,
+            onClose = { viewModel.openControlCenter(false) },
+            onToggleTorch = viewModel::toggleTorch,
+            onToggleAutoRotate = viewModel::toggleAutoRotate,
+            onCycleRingerMode = viewModel::cycleRingerMode,
+            onSetBrightness = viewModel::setSystemBrightness,
+            onSetMediaVolume = viewModel::setMediaVolume,
+            onRefreshSystem = viewModel::refreshControlCenterSnapshot,
+            onUpdateSettings = viewModel::updateSettings,
+            onOpenSettingsSection = { sec ->
+              viewModel.openControlCenter(false)
+              viewModel.navigateTo(LauncherDestination.SETTINGS, sec)
+            },
+          )
+        }
+
+        // Animated Zero Screen Workspace (Swipe Left / Minus-One)
+        AnimatedVisibility(
+          visible = state.isZeroScreenActive && state.destination == LauncherDestination.HOME,
+          enter =
+            if (animEnabled) {
+              slideInHorizontally(FluidMotionSpecs.offsetSpring(speed)) { it } + fadeIn()
+            } else {
+              fadeIn()
+            },
+          exit =
+            if (animEnabled) {
+              slideOutHorizontally(FluidMotionSpecs.offsetSpring(speed)) { it } + fadeOut()
+            } else {
+              fadeOut()
+            },
+        ) {
+          ZeroScreenView(
+            state = state,
+            onClose = { viewModel.openZeroScreen(false) },
+            onOpenSearch = {
+              viewModel.openZeroScreen(false)
+              viewModel.openDrawer(true)
+            },
+            onOpenAiArchitect = {
+              viewModel.openZeroScreen(false)
+              viewModel.navigateTo(LauncherDestination.THEME_GENERATOR)
+            },
+            onAskQuickAi = { q -> viewModel.askAiQuestion(q) },
+            onOpenClonerVault = {
+              viewModel.openZeroScreen(false)
+              viewModel.navigateTo(LauncherDestination.CLONER_VAULT)
+            },
+            onLaunchApp = viewModel::launchApp,
+            onOpenWebApp = { webApp -> viewModel.openIsolatedWebApp(webApp) },
           )
         }
       }
@@ -238,8 +389,24 @@ fun LauncherAppRoot(
           onOpenAppInfo = { viewModel.openAppInfo(app.packageName) },
         )
       }
+
+      // Cloner Vault App Unlock Prompt
+      state.pendingUnlockApp?.let { lockedApp ->
+        AppUnlockDialog(
+          app = lockedApp,
+          vaultPinHash = state.settings.vaultPinHash,
+          onDismiss = viewModel::cancelUnlockPrompt,
+          onUnlocked = viewModel::completeUnlockedLaunch,
+        )
+      }
+
+      // Isolated Web App Sandbox Dialog
+      state.activeWebApp?.let { webApp ->
+        IsolatedWebAppDialog(
+          webApp = webApp,
+          onDismiss = { viewModel.openIsolatedWebApp(null) },
+        )
+      }
     }
   }
 }
-
-private val Number.dp get() = androidx.compose.ui.unit.Dp(this.toFloat())

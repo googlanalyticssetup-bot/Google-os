@@ -46,6 +46,8 @@ fun AppDrawerOverlay(
   onLongPressApp: (InstalledAppInfo) -> Unit,
   onOpenSettingsSection: (SettingsSection?) -> Unit,
   onOpenThemeGenerator: () -> Unit,
+  onCreateFolderFromDrawer: (String, List<InstalledAppInfo>) -> Unit = { _, _ -> },
+  onOpenClonerVault: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   BackHandler { onClose() }
@@ -58,6 +60,11 @@ fun AppDrawerOverlay(
 
   var selectedCategory by remember { mutableStateOf(AppCategory.ALL) }
   var selectedLetter by remember { mutableStateOf<Char?>(null) }
+  var workProfileOnly by remember { mutableStateOf(false) }
+  var folderBuildMode by remember { mutableStateOf(false) }
+  var selectedForFolder by remember { mutableStateOf(setOf<String>()) }
+  var showFolderNameDialog by remember { mutableStateOf(false) }
+  var folderTitleDraft by remember { mutableStateOf("My Folder") }
 
   val voiceLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
@@ -86,7 +93,7 @@ fun AppDrawerOverlay(
     }
 
   val filteredApps =
-    remember(visibleApps, state.searchQuery, selectedCategory, selectedLetter) {
+    remember(visibleApps, state.searchQuery, selectedCategory, selectedLetter, workProfileOnly) {
       visibleApps.filter { app ->
         val matchesQuery =
           state.searchQuery.isBlank() ||
@@ -96,7 +103,8 @@ fun AppDrawerOverlay(
         val matchesLetter =
           selectedLetter == null ||
             app.label.firstOrNull()?.uppercaseChar() == selectedLetter
-        matchesQuery && matchesCat && matchesLetter
+        val matchesWork = !workProfileOnly || app.isWorkProfile
+        matchesQuery && matchesCat && matchesLetter && matchesWork
       }
     }
 
@@ -217,6 +225,51 @@ fun AppDrawerOverlay(
         }
       }
 
+      // Quick Actions: Create Folder, Manage Apps (Cloner Vault), Work Profile filter
+      Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        FilterChip(
+          selected = folderBuildMode,
+          onClick = {
+            folderBuildMode = !folderBuildMode
+            if (!folderBuildMode) selectedForFolder = emptySet()
+          },
+          leadingIcon = { Icon(Icons.Rounded.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp)) },
+          label = {
+            Text(
+              if (folderBuildMode) "Select Apps (${selectedForFolder.size})" else "Create Folder",
+              style = MaterialTheme.typography.labelSmall,
+            )
+          },
+          modifier = Modifier.testTag("drawer_create_folder_btn"),
+        )
+        if (folderBuildMode && selectedForFolder.isNotEmpty()) {
+          Button(
+            onClick = { showFolderNameDialog = true },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.heightIn(min = 36.dp).testTag("drawer_confirm_folder_btn"),
+          ) {
+            Text("Save Folder (${selectedForFolder.size})", style = MaterialTheme.typography.labelSmall)
+          }
+        }
+        AssistChip(
+          onClick = onOpenClonerVault,
+          leadingIcon = { Icon(Icons.Rounded.ManageAccounts, contentDescription = null, modifier = Modifier.size(16.dp)) },
+          label = { Text("Manage Apps & Vault", style = MaterialTheme.typography.labelSmall) },
+        )
+        if (state.installedApps.any { it.isWorkProfile }) {
+          FilterChip(
+            selected = workProfileOnly,
+            onClick = { workProfileOnly = !workProfileOnly },
+            leadingIcon = { Icon(Icons.Rounded.Work, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            label = { Text("Work", style = MaterialTheme.typography.labelSmall) },
+          )
+        }
+      }
+
       // Recent search history pills when search is empty or active
       if (settings.showSearchHistory && state.searchHistory.isNotEmpty() && state.searchQuery.isBlank()) {
         Row(
@@ -327,6 +380,16 @@ fun AppDrawerOverlay(
           settings.drawerColumns.coerceIn(3, 7)
         }
 
+      val handleAppClick: (InstalledAppInfo) -> Unit = { app ->
+        if (folderBuildMode) {
+          selectedForFolder =
+            if (app.componentKey in selectedForFolder) selectedForFolder - app.componentKey
+            else selectedForFolder + app.componentKey
+        } else {
+          onLaunchApp(app)
+        }
+      }
+
       if (settings.drawerScrollMode == DrawerScrollMode.HORIZONTAL && state.searchQuery.isBlank()) {
         val perPage = cols * 4
         val pageCount = ceil(filteredApps.size / perPage.toFloat()).toInt().coerceAtLeast(1)
@@ -341,13 +404,15 @@ fun AppDrawerOverlay(
               modifier = Modifier.fillMaxSize(),
             ) {
               items(slice, key = { it.componentKey }) { app ->
-                LauncherAppIconTile(
+                DrawerAppCell(
                   app = app,
+                  isSelected = app.componentKey in selectedForFolder,
+                  isLocked = app.packageName in settings.lockedPackages,
                   settings = settings,
                   theme = theme,
                   rules = state.renderRules,
-                  showLabel = settings.showDrawerLabels,
-                  onClick = { onLaunchApp(app) },
+                  primary = primary,
+                  onClick = { handleAppClick(app) },
                   onLongClick = { onLongPressApp(app) },
                 )
               }
@@ -372,7 +437,7 @@ fun AppDrawerOverlay(
           horizontalArrangement = Arrangement.spacedBy(8.dp),
           modifier = Modifier.weight(1f),
         ) {
-          if (settings.drawerShowRecentFrequent && recentFrequentApps.isNotEmpty() && state.searchQuery.isBlank()) {
+          if (settings.drawerShowRecentFrequent && recentFrequentApps.isNotEmpty() && state.searchQuery.isBlank() && !folderBuildMode) {
             item(span = { GridItemSpan(cols) }) {
               Text(
                 text = "Recently & Frequently Used",
@@ -382,13 +447,15 @@ fun AppDrawerOverlay(
               )
             }
             items(recentFrequentApps, key = { "recent_${it.componentKey}" }) { app ->
-              LauncherAppIconTile(
+              DrawerAppCell(
                 app = app,
+                isSelected = false,
+                isLocked = app.packageName in settings.lockedPackages,
                 settings = settings,
                 theme = theme,
                 rules = state.renderRules,
-                showLabel = settings.showDrawerLabels,
-                onClick = { onLaunchApp(app) },
+                primary = primary,
+                onClick = { handleAppClick(app) },
                 onLongClick = { onLongPressApp(app) },
               )
             }
@@ -398,18 +465,97 @@ fun AppDrawerOverlay(
           }
 
           items(filteredApps, key = { it.componentKey }) { app ->
-            LauncherAppIconTile(
+            DrawerAppCell(
               app = app,
+              isSelected = app.componentKey in selectedForFolder,
+              isLocked = app.packageName in settings.lockedPackages,
               settings = settings,
               theme = theme,
               rules = state.renderRules,
-              showLabel = settings.showDrawerLabels,
-              onClick = { onLaunchApp(app) },
+              primary = primary,
+              onClick = { handleAppClick(app) },
               onLongClick = { onLongPressApp(app) },
             )
           }
         }
       }
+    }
+  }
+
+  if (showFolderNameDialog) {
+    AlertDialog(
+      onDismissRequest = { showFolderNameDialog = false },
+      title = { Text("Create Home Folder") },
+      text = {
+        OutlinedTextField(
+          value = folderTitleDraft,
+          onValueChange = { folderTitleDraft = it },
+          label = { Text("Folder Name") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val chosenApps = visibleApps.filter { it.componentKey in selectedForFolder }
+            onCreateFolderFromDrawer(folderTitleDraft, chosenApps)
+            showFolderNameDialog = false
+            folderBuildMode = false
+            selectedForFolder = emptySet()
+            onClose()
+          },
+        ) {
+          Text("Create")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showFolderNameDialog = false }) { Text("Cancel") }
+      },
+    )
+  }
+}
+
+@Composable
+private fun DrawerAppCell(
+  app: InstalledAppInfo,
+  isSelected: Boolean,
+  isLocked: Boolean,
+  settings: LauncherSettings,
+  theme: com.example.domain.model.ThemeSpec,
+  rules: com.example.domain.model.EffectiveRenderRules,
+  primary: Color,
+  onClick: () -> Unit,
+  onLongClick: () -> Unit,
+) {
+  Box(
+    modifier =
+      if (isSelected) Modifier.background(primary.copy(alpha = 0.24f), RoundedCornerShape(14.dp))
+      else Modifier,
+  ) {
+    LauncherAppIconTile(
+      app = app,
+      settings = settings,
+      theme = theme,
+      rules = rules,
+      showLabel = settings.showDrawerLabels,
+      onClick = onClick,
+      onLongClick = onLongClick,
+    )
+    if (isSelected) {
+      Icon(
+        Icons.Rounded.CheckCircle,
+        contentDescription = "Selected for folder",
+        tint = primary,
+        modifier = Modifier.align(Alignment.TopEnd).size(18.dp),
+      )
+    } else if (isLocked) {
+      Icon(
+        Icons.Rounded.Lock,
+        contentDescription = "App locked",
+        tint = primary.copy(alpha = 0.9f),
+        modifier = Modifier.align(Alignment.TopEnd).size(15.dp),
+      )
     }
   }
 }

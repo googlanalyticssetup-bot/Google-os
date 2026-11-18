@@ -1,17 +1,18 @@
 <resources>
-    <string name="app_name">Theme Studio</string>
-    <string name="widget_name">Theme Studio Glass Widget</string>
-    <string name="widget_description">Offline glass clock, status, and active theme widget synced directly from Theme Studio.</string>
-    <string name="nav_ai_studio">AI Studio</string>
+    <string name="app_name">Aether Glass</string>
+    <string name="widget_name">Aether Glass Widget</string>
+    <string name="widget_description">Fluid glass clock, status, and active theme widget synced from Aether Glass OS.</string>
+    <string name="notification_listener_label">Aether Glass Notifications</string>
+    <string name="nav_ai_studio">AI Architect</string>
     <string name="nav_library">Library</string>
     <string name="nav_studios">Studios</string>
     <string name="nav_widgets">Widgets</string>
     <string name="nav_device">Engine</string>
-    <string name="offline_badge">100% Offline • Zero API Keys</string>
-    <string name="cd_app_logo">Theme Studio Prism Icon</string>
+    <string name="offline_badge">Hybrid AI • Local Fallback</string>
+    <string name="cd_app_logo">Aether Glass OS Icon</string>
     <string name="cd_wallpaper_preview">Generated procedural wallpaper preview</string>
     <string name="cd_fingerprint_pad">Interactive fingerprint visual effect test pad</string>
     <string name="widget_unavailable">App Widget unavailable</string>
-    <string name="widget_default_pill">Premium Glass</string>
-    <string name="widget_default_status">Offline Studio • Ready</string>
+    <string name="widget_default_pill">Liquid Glass</string>
+    <string name="widget_default_status">Aether Glass OS • Ready</string>
 </resources>

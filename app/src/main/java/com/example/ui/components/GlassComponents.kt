@@ -1,6 +1,8 @@
 package com.example.ui.components
 
 import android.os.Build
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.*
@@ -21,9 +24,30 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.domain.model.*
 import com.example.ui.theme.*
+
+object FluidMotionSpecs {
+  fun <T> silkySpring(speedMultiplier: Float = 1.0f) =
+    spring<T>(
+      dampingRatio = 0.78f,
+      stiffness = (340f * speedMultiplier.coerceIn(0.5f, 1.8f)),
+    )
+
+  fun <T> crispBounceSpring(speedMultiplier: Float = 1.0f) =
+    spring<T>(
+      dampingRatio = Spring.DampingRatioMediumBouncy,
+      stiffness = (420f * speedMultiplier.coerceIn(0.5f, 1.8f)),
+    )
+
+  fun offsetSpring(speedMultiplier: Float = 1.0f) =
+    spring<IntOffset>(
+      dampingRatio = 0.82f,
+      stiffness = (360f * speedMultiplier.coerceIn(0.5f, 1.8f)),
+    )
+}
 
 @Composable
 fun GlassSurfaceCard(
@@ -32,6 +56,7 @@ fun GlassSurfaceCard(
   rules: EffectiveRenderRules,
   modifier: Modifier = Modifier,
   cornerRadius: Dp = glass.cornerRadiusDp.dp,
+  contentPadding: Dp = 16.dp,
   content: @Composable ColumnScope.() -> Unit,
 ) {
   val primary = Color(palette.primaryHex)
@@ -43,7 +68,7 @@ fun GlassSurfaceCard(
     if (rules.tier == ResolvedTier.LITE) {
       (glass.transparency + 0.45f).coerceIn(0.65f, 0.92f)
     } else {
-      glass.transparency.coerceIn(0.10f, 0.85f)
+      glass.transparency.coerceIn(0.08f, 0.88f)
     }
 
   val borderBrush =
@@ -51,9 +76,9 @@ fun GlassSurfaceCard(
       Brush.linearGradient(
         colors =
           listOf(
-            Color.White.copy(alpha = (0.18f + glass.reflectionOpacity * 0.45f).coerceIn(0.1f, 0.7f)),
-            primary.copy(alpha = (0.15f + glass.glowIntensity * 0.35f).coerceIn(0.1f, 0.55f)),
-            secondary.copy(alpha = 0.12f),
+            Color.White.copy(alpha = (0.16f + glass.reflectionOpacity * 0.48f).coerceIn(0.1f, 0.72f)),
+            primary.copy(alpha = (0.14f + glass.glowIntensity * 0.36f).coerceIn(0.1f, 0.58f)),
+            secondary.copy(alpha = 0.14f),
           ),
       )
     } else {
@@ -66,16 +91,23 @@ fun GlassSurfaceCard(
         Brush.linearGradient(
           listOf(
             surface.copy(alpha = effectiveAlpha),
-            primary.copy(alpha = effectiveAlpha * 0.45f),
-            secondary.copy(alpha = effectiveAlpha * 0.35f),
+            primary.copy(alpha = effectiveAlpha * 0.40f),
+            secondary.copy(alpha = effectiveAlpha * 0.30f),
           ),
         )
       GlassStyle.CRYSTAL ->
         Brush.linearGradient(
           listOf(
-            surface.copy(alpha = effectiveAlpha * 0.85f),
-            Color.White.copy(alpha = 0.08f),
+            surface.copy(alpha = effectiveAlpha * 0.82f),
+            Color.White.copy(alpha = 0.09f),
             surface.copy(alpha = effectiveAlpha),
+          ),
+        )
+      GlassStyle.TRANSPARENT ->
+        Brush.verticalGradient(
+          listOf(
+            Color.White.copy(alpha = (effectiveAlpha * 0.45f).coerceIn(0.05f, 0.28f)),
+            surface.copy(alpha = (effectiveAlpha * 0.65f).coerceIn(0.08f, 0.38f)),
           ),
         )
       else ->
@@ -88,12 +120,12 @@ fun GlassSurfaceCard(
     }
 
   val shadowModifier =
-    if (rules.tier == ResolvedTier.PREMIUM && glass.shadowDepth > 0.25f) {
+    if (rules.tier != ResolvedTier.LITE && glass.shadowDepth > 0.20f) {
       Modifier.shadow(
         elevation = (glass.shadowDepth * 14f).dp,
         shape = shape,
-        ambientColor = primary.copy(alpha = 0.45f),
-        spotColor = primary.copy(alpha = 0.45f),
+        ambientColor = primary.copy(alpha = 0.42f),
+        spotColor = primary.copy(alpha = 0.42f),
       )
     } else {
       Modifier
@@ -117,7 +149,7 @@ fun GlassSurfaceCard(
       )
     }
     Column(
-      modifier = Modifier.padding(16.dp),
+      modifier = Modifier.padding(contentPadding),
       content = content,
     )
   }
@@ -171,7 +203,7 @@ fun StudioTopHeader(
         )
         Spacer(modifier = Modifier.width(4.dp))
         Text(
-          text = "${rules.tier.label} • Offline",
+          text = "${rules.tier.label} • Aether",
           style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.onSurface,
         )
@@ -181,28 +213,33 @@ fun StudioTopHeader(
 }
 
 @Composable
-fun OfflinePrivacyPill(modifier: Modifier = Modifier) {
+fun OfflinePrivacyPill(
+  modifier: Modifier = Modifier,
+  label: String = "Gemini AI Logic • Onboard Fallback • Zero Exposed Keys",
+  isOnlineReady: Boolean = true,
+) {
+  val accent = if (isOnlineReady) ElectricCyan else EmeraldMint
   Surface(
     modifier = modifier,
     shape = RoundedCornerShape(50),
-    color = EmeraldMint.copy(alpha = 0.12f),
-    border = BorderStroke(1.dp, EmeraldMint.copy(alpha = 0.35f)),
+    color = accent.copy(alpha = 0.12f),
+    border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
   ) {
     Row(
       modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Icon(
-        imageVector = Icons.Rounded.Lock,
+        imageVector = if (isOnlineReady) Icons.Rounded.AutoAwesome else Icons.Rounded.Lock,
         contentDescription = null,
-        tint = EmeraldMint,
+        tint = accent,
         modifier = Modifier.size(14.dp),
       )
       Spacer(modifier = Modifier.width(6.dp))
       Text(
-        text = "No API Key • On-Device AI • Local Storage",
+        text = label,
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-        color = EmeraldMint,
+        color = accent,
       )
     }
   }

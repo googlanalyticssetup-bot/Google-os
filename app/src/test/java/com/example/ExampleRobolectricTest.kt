@@ -8,6 +8,7 @@ import com.example.launcher.data.LauncherBackupCodec
 import com.example.launcher.data.LauncherPreferencesStore
 import com.example.launcher.engine.ThemeGeneratorEngine
 import com.example.launcher.model.*
+import com.example.launcher.system.VaultSecurityHelper
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,12 +23,31 @@ class ExampleRobolectricTest {
   fun `read app name from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("Theme Studio", appName)
+    assertEquals("Aether Glass", appName)
   }
 
   @Test
   fun `built in theme library contains all 15 presets`() {
     assertEquals(15, BuiltInThemes.all.size)
+  }
+
+  @Test
+  fun `atomic widgets library provides 13 widget kinds`() {
+    assertEquals(13, CustomWidgetKind.entries.size)
+    assertTrue(CustomWidgetKind.ANALOG_CLOCK in CustomWidgetKind.entries)
+    assertTrue(CustomWidgetKind.STORAGE in CustomWidgetKind.entries)
+    assertTrue(CustomWidgetKind.WELLNESS in CustomWidgetKind.entries)
+    assertTrue(CustomWidgetKind.AI_WORKSPACE in CustomWidgetKind.entries)
+    assertTrue(CustomWidgetKind.DUAL_SPACE in CustomWidgetKind.entries)
+  }
+
+  @Test
+  fun `vault security helper hashes PIN and validates https URLs`() {
+    val hash = VaultSecurityHelper.hashPin("2468")
+    assertTrue(VaultSecurityHelper.verifyPin("2468", hash))
+    assertFalse(VaultSecurityHelper.verifyPin("0000", hash))
+    assertEquals("https://example.com", VaultSecurityHelper.sanitizeHttpsUrl("example.com"))
+    assertNull(VaultSecurityHelper.sanitizeHttpsUrl("   "))
   }
 
   @Test
@@ -47,11 +67,13 @@ class ExampleRobolectricTest {
   fun `launcher settings and layout backup round trip preserves state`() {
     val settings =
       LauncherSettings(
+        onboardingCompleted = true,
         gridColumns = 5,
         gridRows = 6,
         iconStyle = LauncherIconStyle.LIQUID_GLASS,
         dockStyle = DockStyle.TRANSPARENT,
         hiddenPackages = setOf("com.example.secretview"),
+        lockedPackages = setOf("com.example.bank"),
       )
     val items =
       listOf(
@@ -76,9 +98,26 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `preferences json codec preserves custom app labels and icon styles`() {
+  fun `preferences json codec preserves extended Aether Glass OS settings`() {
+    val webApp = IsolatedWebApp(id = "w1", title = "Mail", url = "https://mail.example.com", isolateCookies = true)
+    val tiles = listOf(
+      ControlCenterTileConfig(ControlCenterTileId.WIFI, true, ControlCenterTileSize.WIDE_2X1),
+      ControlCenterTileConfig(ControlCenterTileId.TORCH, false, ControlCenterTileSize.COMPACT_1X1),
+    )
     val original =
       LauncherSettings(
+        onboardingCompleted = true,
+        zeroScreenEnabled = false,
+        dynamicCapsuleEnabled = true,
+        glassBlurStrength = 0.85f,
+        glassTransparency = 0.18f,
+        customAccentHex = 0xFF38BDF8L,
+        lockedPackages = setOf("com.locked.app"),
+        vaultPinHash = VaultSecurityHelper.hashPin("9876"),
+        isolatedWebApps = listOf(webApp),
+        controlCenterTiles = tiles,
+        controlCenterTileShape = TileShape.PILL,
+        controlCenterAccentHex = 0xFFF59E0BL,
         customAppLabels = mapOf("com.foo/Bar" to "Camera Pro"),
         customAppIconStyles = mapOf("com.foo/Bar" to LauncherIconStyle.NEON),
         autoAdaptLargeScreen = false,
@@ -87,6 +126,16 @@ class ExampleRobolectricTest {
       )
     val json = LauncherPreferencesStore.encodeSettings(original)
     val restored = LauncherPreferencesStore.decodeSettings(json)
+    assertTrue(restored.onboardingCompleted)
+    assertFalse(restored.zeroScreenEnabled)
+    assertEquals(0.85f, restored.glassBlurStrength, 0.01f)
+    assertEquals(0xFF38BDF8L, restored.customAccentHex)
+    assertTrue("com.locked.app" in restored.lockedPackages)
+    assertEquals(1, restored.isolatedWebApps.size)
+    assertEquals("Mail", restored.isolatedWebApps.first().title)
+    assertEquals(TileShape.PILL, restored.controlCenterTileShape)
+    assertEquals(0xFFF59E0BL, restored.controlCenterAccentHex)
+    assertFalse(restored.controlCenterTiles.first { it.id == ControlCenterTileId.TORCH }.visible)
     assertEquals("Camera Pro", restored.customAppLabels["com.foo/Bar"])
     assertEquals(LauncherIconStyle.NEON, restored.customAppIconStyles["com.foo/Bar"])
     assertFalse(restored.autoAdaptLargeScreen)

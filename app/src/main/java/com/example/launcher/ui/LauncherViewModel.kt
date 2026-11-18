@@ -4,9 +4,14 @@ import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.hardware.camera2.CameraManager
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ai.AetherAiArchitectRepository
+import com.example.ai.AiArchitectChatTurn
+import com.example.ai.AiGenerationResult
 import com.example.domain.model.*
 import com.example.engine.*
 import com.example.launcher.data.AppUsageEntity
@@ -14,71 +19,50 @@ import com.example.launcher.data.LauncherRepository
 import com.example.launcher.engine.GeneratedPaletteResult
 import com.example.launcher.engine.ThemeGeneratorEngine
 import com.example.launcher.model.*
-import com.example.launcher.system.AppCatalogLoader
-import com.example.launcher.system.ContactSearchMatch
-import com.example.launcher.system.LauncherSystemBridge
+import com.example.launcher.system.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class LauncherDestination {
-  HOME,
-  THEME_GENERATOR,
-  SETTINGS,
-}
-
-data class LauncherUiState(
-  val destination: LauncherDestination = LauncherDestination.HOME,
-  val settingsSection: SettingsSection? = null,
-  val settings: LauncherSettings = LauncherSettings(),
-  val activeTheme: ThemeSpec = BuiltInThemes.all.first(),
-  val allThemes: List<ThemeSpec> = BuiltInThemes.all,
-  val installedApps: List<InstalledAppInfo> = emptyList(),
-  val homeItems: List<HomeItem> = emptyList(),
-  val searchHistory: List<String> = emptyList(),
-  val searchQuery: String = "",
-  val contactMatches: List<ContactSearchMatch> = emptyList(),
-  val isDrawerOpen: Boolean = false,
-  val isEditMode: Boolean = false,
-  val activeFolderId: String? = null,
-  val currentPage: Int = 0,
-  val wallpaperBitmap: Bitmap? = null,
-  val deviceCapabilities: DeviceCapabilities,
-  val renderRules: EffectiveRenderRules,
-  val isDefaultHome: Boolean = false,
-  val isDeviceAdminActive: Boolean = false,
-  val isSpeechAvailable: Boolean = false,
-  val isForeground: Boolean = true,
-  val themeGenPrompt: String =
-    "ColorOS 7 frosted cyan and luminous violet glass with deep obsidian dock",
-  val themeGenResult: GeneratedPaletteResult? = null,
-  val statusMessage: String? = null,
-)
+private const val TAG = "LauncherViewModel"
 
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
 
   private val repo = LauncherRepository(application)
+  private val aiRepo = AetherAiArchitectRepository()
   private val initialCaps = HardwareCapabilityEngine.inspectDevice(application)
   private val initialRules =
     HardwareCapabilityEngine.resolveRenderRules(PerformanceMode.AUTO, initialCaps, true)
 
+  private val _isInitialized = MutableStateFlow(false)
   private val _destination = MutableStateFlow(LauncherDestination.HOME)
   private val _settingsSection = MutableStateFlow<SettingsSection?>(null)
   private val _installedApps = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
   private val _searchQuery = MutableStateFlow("")
   private val _contactMatches = MutableStateFlow<List<ContactSearchMatch>>(emptyList())
   private val _isDrawerOpen = MutableStateFlow(false)
+  private val _isControlCenterOpen = MutableStateFlow(false)
+  private val _isZeroScreenActive = MutableStateFlow(false)
   private val _isEditMode = MutableStateFlow(false)
   private val _activeFolderId = MutableStateFlow<String?>(null)
+  private val _pendingUnlockApp = MutableStateFlow<InstalledAppInfo?>(null)
+  private val _activeWebApp = MutableStateFlow<IsolatedWebApp?>(null)
   private val _currentPage = MutableStateFlow(0)
   private val _wallpaperBitmap = MutableStateFlow<Bitmap?>(null)
   private val _capabilities = MutableStateFlow(initialCaps)
+  private val _ccSnapshot =
+    MutableStateFlow(ControlCenterSystemController.inspectSnapshot(application))
+  private val _torchEnabled = MutableStateFlow(false)
+  private val _capsuleState = MutableStateFlow(DynamicCapsuleState())
   private val _isForeground = MutableStateFlow(true)
   private val _themeGenPrompt =
-    MutableStateFlow("ColorOS 7 frosted cyan and luminous violet glass with deep obsidian dock")
+    MutableStateFlow("Aether liquid glass with warm obsidian highlights and electric cyan accents")
   private val _themeGenResult = MutableStateFlow<GeneratedPaletteResult?>(null)
+  private val _aiArchitect = MutableStateFlow(AiArchitectUiState())
   private val _statusMessage = MutableStateFlow<String?>(null)
   private val _isDefaultHome =
     MutableStateFlow(LauncherSystemBridge.isDefaultHomeLauncher(application))
@@ -87,6 +71,15 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
   private var wallpaperLoadJob: Job? = null
   private var contactSearchJob: Job? = null
+  private var stopwatchJob: Job? = null
+  private var aiJob: Job? = null
+
+  private val torchCallback =
+    object : CameraManager.TorchCallback() {
+      override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+        _torchEnabled.value = enabled
+      }
+    }
 
   private val dataBundleFlow =
     combine(
@@ -116,8 +109,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
       _searchQuery,
       _contactMatches,
       _isDrawerOpen,
+      _isControlCenterOpen,
       _isEditMode,
       _activeFolderId,
+      _pendingUnlockApp,
+      _activeWebApp,
+      _isZeroScreenActive,
     ) { vals ->
       @Suppress("UNCHECKED_CAST")
       InteractionBundle(
@@ -127,33 +124,52 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         query = vals[3] as String,
         contacts = vals[4] as List<ContactSearchMatch>,
         drawerOpen = vals[5] as Boolean,
-        editMode = vals[6] as Boolean,
-        folderId = vals[7] as String?,
+        ccOpen = vals[6] as Boolean,
+        editMode = vals[7] as Boolean,
+        folderId = vals[8] as String?,
+        pendingUnlockApp = vals[9] as InstalledAppInfo?,
+        activeWebApp = vals[10] as IsolatedWebApp?,
+        zeroScreenActive = vals[11] as Boolean,
       )
     }
 
   private val systemBundleFlow =
     combine(
+      _isInitialized,
       _currentPage,
       _wallpaperBitmap,
       _capabilities,
+      _ccSnapshot,
+      _torchEnabled,
+      _capsuleState,
       _isForeground,
       _themeGenPrompt,
       _themeGenResult,
+      _aiArchitect,
       _statusMessage,
       _isDefaultHome,
       _isDeviceAdminActive,
+      NotificationStreamHub.notifications,
+      NotificationStreamHub.activeMedia,
     ) { vals ->
+      @Suppress("UNCHECKED_CAST")
       SystemBundle(
-        page = vals[0] as Int,
-        wpBitmap = vals[1] as Bitmap?,
-        caps = vals[2] as DeviceCapabilities,
-        fg = vals[3] as Boolean,
-        genPrompt = vals[4] as String,
-        genResult = vals[5] as GeneratedPaletteResult?,
-        status = vals[6] as String?,
-        isDefaultHome = vals[7] as Boolean,
-        isDeviceAdmin = vals[8] as Boolean,
+        initialized = vals[0] as Boolean,
+        page = vals[1] as Int,
+        wpBitmap = vals[2] as Bitmap?,
+        caps = vals[3] as DeviceCapabilities,
+        ccSnapshot = vals[4] as ControlCenterSystemSnapshot,
+        torchEnabled = vals[5] as Boolean,
+        capsule = vals[6] as DynamicCapsuleState,
+        fg = vals[7] as Boolean,
+        genPrompt = vals[8] as String,
+        genResult = vals[9] as GeneratedPaletteResult?,
+        aiArchitect = vals[10] as AiArchitectUiState,
+        status = vals[11] as String?,
+        isDefaultHome = vals[12] as Boolean,
+        isDeviceAdmin = vals[13] as Boolean,
+        notifications = vals[14] as List<LiveNotificationItem>,
+        activeMedia = vals[15] as ActiveMediaTrack?,
       )
     }
 
@@ -175,13 +191,15 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
           caps = sys.caps,
           animationsMasterEnabled = data.settings.animationsEnabled,
         )
+      val mergedTheme = applyGlassAndAccentOverrides(data.activeTheme, data.settings)
       val ctx = getApplication<Application>()
 
       LauncherUiState(
+        isInitialized = sys.initialized,
         destination = inter.destination,
         settingsSection = inter.settingsSection,
         settings = data.settings,
-        activeTheme = data.activeTheme,
+        activeTheme = mergedTheme,
         allThemes = data.allThemes,
         installedApps = enrichedApps,
         homeItems = data.homeItems,
@@ -189,18 +207,28 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         searchQuery = inter.query,
         contactMatches = inter.contacts,
         isDrawerOpen = inter.drawerOpen,
+        isControlCenterOpen = inter.ccOpen,
+        isZeroScreenActive = inter.zeroScreenActive,
         isEditMode = inter.editMode,
         activeFolderId = inter.folderId,
+        pendingUnlockApp = inter.pendingUnlockApp,
+        activeWebApp = inter.activeWebApp,
         currentPage = sys.page,
         wallpaperBitmap = sys.wpBitmap,
         deviceCapabilities = sys.caps,
         renderRules = rules,
+        controlCenterSnapshot = sys.ccSnapshot,
+        torchEnabled = sys.torchEnabled,
+        liveNotifications = sys.notifications,
+        activeMedia = sys.activeMedia,
+        capsuleState = sys.capsule,
         isDefaultHome = sys.isDefaultHome,
         isDeviceAdminActive = sys.isDeviceAdmin,
         isSpeechAvailable = LauncherSystemBridge.isSpeechRecognitionAvailable(ctx),
         isForeground = sys.fg,
         themeGenPrompt = sys.genPrompt,
         themeGenResult = sys.genResult,
+        aiArchitect = sys.aiArchitect,
         statusMessage = sys.status,
       )
     }.stateIn(
@@ -214,12 +242,20 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     )
 
   init {
+    runCatching {
+      val cm = application.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+      cm?.registerTorchCallback(torchCallback, null)
+    }
+
     viewModelScope.launch {
+      val curSettings = repo.settings.first()
+      if (!curSettings.onboardingCompleted) {
+        _destination.value = LauncherDestination.ONBOARDING
+      }
       val apps = repo.loadApps()
       _installedApps.value = apps
       repo.initializeDefaultsIfNeeded(apps)
       generateThemePaletteFromText(_themeGenPrompt.value, silent = true)
-      val curSettings = repo.settings.first()
       val curTheme = repo.activeTheme.first()
       val rules =
         HardwareCapabilityEngine.resolveRenderRules(
@@ -228,7 +264,37 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
           curSettings.animationsEnabled,
         )
       refreshWallpaperBitmap(curTheme, curSettings.customWallpaperUri, rules)
+      _isInitialized.value = true
     }
+  }
+
+  override fun onCleared() {
+    super.onCleared()
+    runCatching {
+      val cm = getApplication<Application>().getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+      cm?.unregisterTorchCallback(torchCallback)
+    }
+  }
+
+  private fun applyGlassAndAccentOverrides(theme: ThemeSpec, s: LauncherSettings): ThemeSpec {
+    val accent = s.customAccentHex
+    val palette =
+      if (accent != null) {
+        theme.palette.copy(primaryHex = accent, accentGlowHex = accent)
+      } else {
+        theme.palette
+      }
+    return theme.copy(
+      palette = palette,
+      glass =
+        theme.glass.copy(
+          blurStrength = s.glassBlurStrength,
+          transparency = s.glassTransparency,
+          reflectionOpacity = s.glassBorderReflection,
+          shadowDepth = s.glassShadowDepth,
+        ),
+      fontStyle = s.fontStyle,
+    )
   }
 
   fun setForegroundState(inForeground: Boolean) {
@@ -251,8 +317,22 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
       _capabilities.value = HardwareCapabilityEngine.inspectDevice(ctx)
       _isDefaultHome.value = LauncherSystemBridge.isDefaultHomeLauncher(ctx)
       _isDeviceAdminActive.value = LauncherSystemBridge.isDeviceAdminActive(ctx)
+      _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(ctx)
       _installedApps.value = repo.loadApps()
     }
+  }
+
+  fun completeOnboarding() {
+    viewModelScope.launch {
+      repo.updateSettings { it.copy(onboardingCompleted = true) }
+      _destination.value = LauncherDestination.HOME
+    }
+  }
+
+  fun replayOnboarding() {
+    _isDrawerOpen.value = false
+    _isControlCenterOpen.value = false
+    _destination.value = LauncherDestination.ONBOARDING
   }
 
   fun navigateTo(dest: LauncherDestination, section: SettingsSection? = null) {
@@ -260,6 +340,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     _settingsSection.value = section
     if (dest != LauncherDestination.HOME) {
       _isDrawerOpen.value = false
+      _isControlCenterOpen.value = false
+      _isZeroScreenActive.value = false
       _isEditMode.value = false
       _activeFolderId.value = null
     }
@@ -271,12 +353,33 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
   fun openDrawer(open: Boolean) {
     _isDrawerOpen.value = open
+    if (open) _isControlCenterOpen.value = false
     if (!open) _searchQuery.value = ""
+  }
+
+  fun openControlCenter(open: Boolean) {
+    _isControlCenterOpen.value = open
+    if (open) {
+      _isDrawerOpen.value = false
+      _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(getApplication())
+    }
+  }
+
+  fun openZeroScreen(open: Boolean) {
+    _isZeroScreenActive.value = open
+    if (open) {
+      _isDrawerOpen.value = false
+      _isControlCenterOpen.value = false
+      _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(getApplication())
+    }
   }
 
   fun setEditMode(edit: Boolean) {
     _isEditMode.value = edit
-    if (edit) _isDrawerOpen.value = false
+    if (edit) {
+      _isDrawerOpen.value = false
+      _isControlCenterOpen.value = false
+    }
   }
 
   fun openFolder(folderId: String?) {
@@ -286,6 +389,86 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
   fun setCurrentPage(page: Int) {
     _currentPage.value = page
   }
+
+  fun toggleCapsuleExpanded() {
+    _capsuleState.update { it.copy(expanded = !it.expanded) }
+  }
+
+  fun startOrPauseStopwatch() {
+    val currentlyRunning = _capsuleState.value.stopwatchRunning
+    if (currentlyRunning) {
+      stopwatchJob?.cancel()
+      _capsuleState.update { it.copy(stopwatchRunning = false) }
+    } else {
+      _capsuleState.update { it.copy(stopwatchRunning = true) }
+      stopwatchJob?.cancel()
+      stopwatchJob =
+        viewModelScope.launch {
+          while (true) {
+            delay(1_000L)
+            _capsuleState.update { it.copy(stopwatchElapsedMs = it.stopwatchElapsedMs + 1_000L) }
+          }
+        }
+    }
+  }
+
+  fun resetStopwatch() {
+    stopwatchJob?.cancel()
+    _capsuleState.update { it.copy(stopwatchRunning = false, stopwatchElapsedMs = 0L) }
+  }
+
+  // --- Control Center System Actions ---
+
+  fun refreshControlCenterSnapshot() {
+    _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(getApplication())
+  }
+
+  fun toggleTorch() {
+    val ctx = getApplication<Application>()
+    if (!_ccSnapshot.value.torchAvailable) {
+      _statusMessage.value = "Camera flash hardware unavailable on this device"
+      return
+    }
+    val next = !_torchEnabled.value
+    val ok = ControlCenterSystemController.setTorchEnabled(ctx, next)
+    if (ok) _torchEnabled.value = next
+    else _statusMessage.value = "Unable to toggle flashlight"
+  }
+
+  fun setSystemBrightness(percent: Int) {
+    val ctx = getApplication<Application>()
+    if (ControlCenterSystemController.setSystemBrightnessPercent(ctx, percent)) {
+      _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(ctx)
+    } else {
+      ControlCenterSystemController.openWriteSettingsPermission(ctx)
+      _statusMessage.value = "Grant 'Modify system settings' to control device brightness"
+    }
+  }
+
+  fun setMediaVolume(index: Int) {
+    val ctx = getApplication<Application>()
+    ControlCenterSystemController.setMediaVolume(ctx, index)
+    _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(ctx)
+  }
+
+  fun toggleAutoRotate() {
+    val ctx = getApplication<Application>()
+    val target = !_ccSnapshot.value.autoRotateOn
+    if (ControlCenterSystemController.setAutoRotate(ctx, target)) {
+      _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(ctx)
+    } else {
+      ControlCenterSystemController.openWriteSettingsPermission(ctx)
+      _statusMessage.value = "Grant 'Modify system settings' or toggle in Display Settings"
+    }
+  }
+
+  fun cycleRingerMode() {
+    val ctx = getApplication<Application>()
+    ControlCenterSystemController.cycleRingerMode(ctx)
+    _ccSnapshot.value = ControlCenterSystemController.inspectSnapshot(ctx)
+  }
+
+  // --- Search ---
 
   fun updateSearchQuery(query: String) {
     _searchQuery.value = query
@@ -301,9 +484,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
   }
 
   fun submitSearchQuery(query: String) {
-    viewModelScope.launch {
-      repo.addSearchHistory(query)
-    }
+    viewModelScope.launch { repo.addSearchHistory(query) }
   }
 
   fun clearSearchHistory() {
@@ -313,14 +494,34 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
   }
 
+  // --- App Launch & Cloner Vault App Lock ---
+
   fun launchApp(app: InstalledAppInfo) {
-    val launched = AppCatalogLoader.launchApp(getApplication(), app.packageName, app.activityName)
+    val settings = uiState.value.settings
+    if (app.packageName in settings.lockedPackages) {
+      _pendingUnlockApp.value = app
+    } else {
+      performDirectLaunch(app)
+    }
+  }
+
+  fun cancelUnlockPrompt() {
+    _pendingUnlockApp.value = null
+  }
+
+  fun completeUnlockedLaunch() {
+    val app = _pendingUnlockApp.value ?: return
+    _pendingUnlockApp.value = null
+    performDirectLaunch(app)
+  }
+
+  private fun performDirectLaunch(app: InstalledAppInfo) {
+    val launched = AppCatalogLoader.launchInstalledApp(getApplication(), app)
     if (launched) {
-      viewModelScope.launch {
-        repo.recordAppLaunch(app.packageName)
-      }
+      viewModelScope.launch { repo.recordAppLaunch(app.packageName) }
       _isDrawerOpen.value = false
       _activeFolderId.value = null
+      _isZeroScreenActive.value = false
     } else {
       _statusMessage.value = "Unable to launch ${app.label}"
     }
@@ -335,6 +536,50 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     AppCatalogLoader.openAppInfo(getApplication(), packageName)
   }
 
+  fun toggleLockedPackage(packageName: String, locked: Boolean) {
+    updateSettings { s ->
+      val next = s.lockedPackages.toMutableSet()
+      if (locked) next.add(packageName) else next.remove(packageName)
+      s.copy(lockedPackages = next)
+    }
+    _statusMessage.value =
+      if (locked) "App added to Cloner Vault launcher lock"
+      else "App lock removed"
+  }
+
+  fun setVaultPin(pin: String?) {
+    val hashed = pin?.takeIf { it.length >= 4 }?.let { VaultSecurityHelper.hashPin(it) }
+    updateSettings { it.copy(vaultPinHash = hashed) }
+    _statusMessage.value = if (hashed != null) "Cloner Vault PIN saved" else "Cloner Vault PIN cleared"
+  }
+
+  fun addIsolatedWebApp(title: String, rawUrl: String, isolateCookies: Boolean) {
+    val safeUrl = VaultSecurityHelper.sanitizeHttpsUrl(rawUrl)
+    if (safeUrl == null) {
+      _statusMessage.value = "Enter a valid https:// or http:// web app URL"
+      return
+    }
+    val item =
+      IsolatedWebApp(
+        id = "webapp_${System.currentTimeMillis()}",
+        title = title.trim().ifBlank { Uri.parse(safeUrl).host ?: "Web App" },
+        url = safeUrl,
+        isolateCookies = isolateCookies,
+      )
+    updateSettings { s -> s.copy(isolatedWebApps = s.isolatedWebApps + item) }
+    _statusMessage.value = "Added isolated web app: ${item.title}"
+  }
+
+  fun removeIsolatedWebApp(id: String) {
+    updateSettings { s -> s.copy(isolatedWebApps = s.isolatedWebApps.filterNot { it.id == id }) }
+  }
+
+  fun openIsolatedWebApp(webApp: IsolatedWebApp?) {
+    _activeWebApp.value = webApp
+  }
+
+  // --- Settings, Home Grid & Folders ---
+
   fun updateSettings(transform: (LauncherSettings) -> LauncherSettings) {
     viewModelScope.launch {
       repo.updateSettings(transform)
@@ -347,6 +592,16 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
           s.animationsEnabled,
         )
       refreshWallpaperBitmap(t, s.customWallpaperUri, rules)
+    }
+  }
+
+  fun updateThemeLockAndStyle(transform: (ThemeSpec) -> ThemeSpec) {
+    viewModelScope.launch {
+      val current = repo.activeTheme.first()
+      val updated = transform(current).copy(isBuiltIn = false)
+      repo.saveAndActivateTheme(updated)
+      refreshWallpaperBitmap(updated, uiState.value.settings.customWallpaperUri, uiState.value.renderRules)
+      _statusMessage.value = "Updated theme studio preset"
     }
   }
 
@@ -431,6 +686,28 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         ),
       )
       _statusMessage.value = "Added ${app.label} to Page ${targetPage + 1}"
+    }
+  }
+
+  fun createFolderOnHome(title: String, apps: List<InstalledAppInfo>, page: Int = _currentPage.value) {
+    if (apps.isEmpty()) return
+    viewModelScope.launch {
+      val s = uiState.value.settings
+      val folder =
+        HomeItem(
+          id = "folder_${System.currentTimeMillis()}",
+          type = HomeItemType.FOLDER,
+          page = page.coerceIn(0, (s.pageCount - 1).coerceAtLeast(0)),
+          row = 0,
+          col = 0,
+          folderTitle = title.trim().ifBlank { "Folder" },
+          folderColorHex = s.defaultFolderColorHex,
+          folderStyle = s.defaultFolderStyle,
+          folderLayout = s.defaultFolderLayout,
+          folderAppPackages = apps.map { it.componentKey }.distinct(),
+        )
+      repo.upsertHomeItem(folder)
+      _statusMessage.value = "Created folder \"${folder.folderTitle}\" on Page ${folder.page + 1}"
     }
   }
 
@@ -547,6 +824,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
   }
 
+  // --- AI Architect (Gemini AI Logic + Onboard Engine) ---
+
   fun updateThemeGenPrompt(text: String) {
     _themeGenPrompt.value = text
   }
@@ -568,23 +847,142 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     }
   }
 
+  fun generateGeminiRecommendations(promptOverride: String? = null) {
+    val prompt = (promptOverride ?: _themeGenPrompt.value).trim()
+    if (prompt.isNotBlank()) _themeGenPrompt.value = prompt
+    aiJob?.cancel()
+    aiJob =
+      viewModelScope.launch {
+        _aiArchitect.update {
+          it.copy(isGeneratingThemes = true, errorMessage = null, overviewMessage = null)
+        }
+        when (
+          val res =
+            aiRepo.generateGeminiThemeRecommendations(
+              prompt = prompt.ifBlank { "Aether liquid glass with warm obsidian highlights" },
+              tier = uiState.value.renderRules.tier,
+              formFactor = uiState.value.deviceCapabilities.formFactor,
+            )
+        ) {
+          is AiGenerationResult.Success -> {
+            _aiArchitect.update {
+              it.copy(
+                isGeneratingThemes = false,
+                recommendations = res.recommendations,
+                overviewMessage = res.overview,
+                errorMessage = null,
+              )
+            }
+          }
+          is AiGenerationResult.Error -> {
+            _aiArchitect.update {
+              it.copy(
+                isGeneratingThemes = false,
+                errorMessage = res.message,
+              )
+            }
+          }
+        }
+      }
+  }
+
+  fun generateOfflineRecommendations(promptOverride: String? = null) {
+    val prompt = (promptOverride ?: _themeGenPrompt.value).trim()
+    val recs =
+      aiRepo.generateOfflineFallbackRecommendations(
+        prompt = prompt,
+        tier = uiState.value.renderRules.tier,
+        formFactor = uiState.value.deviceCapabilities.formFactor,
+      )
+    generateThemePaletteFromText(prompt, silent = false)
+    _aiArchitect.update {
+      it.copy(
+        recommendations = recs,
+        overviewMessage = "Generated 3 palettes locally using the Onboard HSL & Contrast Engine.",
+        errorMessage = null,
+      )
+    }
+  }
+
+  fun askAiQuestion(question: String) {
+    val trimmed = question.trim()
+    if (trimmed.isBlank()) return
+    aiJob?.cancel()
+    val userTurn = AiArchitectChatTurn("u_${System.currentTimeMillis()}", true, trimmed)
+    val replyId = "a_${System.currentTimeMillis()}"
+    _aiArchitect.update {
+      it.copy(
+        isStreamingAnswer = true,
+        errorMessage = null,
+        chatTurns = it.chatTurns + userTurn + AiArchitectChatTurn(replyId, false, "Thinking…"),
+      )
+    }
+    aiJob =
+      viewModelScope.launch {
+        try {
+          aiRepo.streamQuestion(
+            question = trimmed,
+            settings = uiState.value.settings,
+            activeTheme = uiState.value.activeTheme,
+            capabilities = uiState.value.deviceCapabilities,
+          ).collect { partial ->
+            _aiArchitect.update { cur ->
+              cur.copy(
+                chatTurns = cur.chatTurns.map { t -> if (t.id == replyId) t.copy(text = partial) else t },
+              )
+            }
+          }
+          _aiArchitect.update { it.copy(isStreamingAnswer = false) }
+        } catch (e: CancellationException) {
+          throw e
+        } catch (e: Exception) {
+          Log.e(TAG, "AI Architect Q&A failed", e)
+          val msg = e.localizedMessage ?: "Gemini AI Logic is unavailable offline."
+          _aiArchitect.update { cur ->
+            cur.copy(
+              isStreamingAnswer = false,
+              errorMessage = msg,
+              chatTurns =
+                cur.chatTurns.map { t ->
+                  if (t.id == replyId) t.copy(text = "Gemini error: $msg", isError = true)
+                  else t
+                },
+            )
+          }
+        }
+      }
+  }
+
   fun applyGeneratedTheme(setWallpaperToo: Boolean = false) {
     val generated = _themeGenResult.value ?: return
+    applyThemeSpec(generated.theme, setWallpaperToo)
+  }
+
+  fun applyThemeSpec(theme: ThemeSpec, setWallpaperToo: Boolean = false) {
     viewModelScope.launch {
-      repo.saveAndActivateTheme(generated.theme)
-      repo.updateSettings { it.copy(customWallpaperUri = null) }
-      refreshWallpaperBitmap(generated.theme, null, uiState.value.renderRules)
+      repo.saveAndActivateTheme(theme)
+      repo.updateSettings {
+        it.copy(
+          customWallpaperUri = null,
+          customAccentHex = null,
+          glassBlurStrength = theme.glass.blurStrength,
+          glassTransparency = theme.glass.transparency,
+          glassBorderReflection = theme.glass.reflectionOpacity,
+          glassShadowDepth = theme.glass.shadowDepth,
+        )
+      }
+      refreshWallpaperBitmap(theme, null, uiState.value.renderRules)
       if (setWallpaperToo) {
         ProceduralWallpaperRenderer.applyToDeviceWallpaper(
           context = getApplication(),
-          theme = generated.theme,
+          theme = theme,
           target = WallpaperTarget.BOTH,
           rules = uiState.value.renderRules,
         )
       }
       _statusMessage.value =
-        if (setWallpaperToo) "Applied ${generated.theme.name} palette & system wallpaper"
-        else "Applied ${generated.theme.name} palette to Launcher"
+        if (setWallpaperToo) "Applied \"${theme.name}\" & system wallpaper"
+        else "Applied \"${theme.name}\" to Aether Glass OS"
     }
   }
 
@@ -695,19 +1093,30 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     val query: String,
     val contacts: List<ContactSearchMatch>,
     val drawerOpen: Boolean,
+    val ccOpen: Boolean,
     val editMode: Boolean,
     val folderId: String?,
+    val pendingUnlockApp: InstalledAppInfo?,
+    val activeWebApp: IsolatedWebApp?,
+    val zeroScreenActive: Boolean,
   )
 
   private data class SystemBundle(
+    val initialized: Boolean,
     val page: Int,
     val wpBitmap: Bitmap?,
     val caps: DeviceCapabilities,
+    val ccSnapshot: ControlCenterSystemSnapshot,
+    val torchEnabled: Boolean,
+    val capsule: DynamicCapsuleState,
     val fg: Boolean,
     val genPrompt: String,
     val genResult: GeneratedPaletteResult?,
+    val aiArchitect: AiArchitectUiState,
     val status: String?,
     val isDefaultHome: Boolean,
     val isDeviceAdmin: Boolean,
+    val notifications: List<LiveNotificationItem>,
+    val activeMedia: ActiveMediaTrack?,
   )
 }

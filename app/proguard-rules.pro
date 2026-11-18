@@ -7,6 +7,7 @@
 # Keep Android AppWidgetProvider and DeviceAdminReceiver components declared in AndroidManifest.xml
 -keep public class com.example.widget.ThemeStudioWidgetProvider { *; }
 -keep public class com.example.launcher.system.LauncherDeviceAdminReceiver { *; }
+-keep public class com.example.launcher.system.AetherNotificationListenerService { *; }
 
 # Keep domain and launcher data models
 -keep class com.example.domain.model.** { *; }

@@ -6,17 +6,23 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -32,6 +38,16 @@ import com.example.ui.components.GlassSurfaceCard
 import com.example.ui.components.PaletteSwatchRow
 import java.util.Locale
 
+private val GlassAccentSwatches =
+  listOf(
+    null to "Theme",
+    0xFF38BDF8L to "Cyan",
+    0xFF8B5CF6L to "Violet",
+    0xFF10B981L to "Mint",
+    0xFFF59E0BL to "Amber",
+    0xFFF43F5EL to "Rose",
+  )
+
 @Composable
 fun SettingsSectionDetailContent(
   section: SettingsSection,
@@ -39,6 +55,10 @@ fun SettingsSectionDetailContent(
   onUpdateSettings: ((LauncherSettings) -> LauncherSettings) -> Unit,
   onActivateTheme: (ThemeSpec) -> Unit,
   onOpenThemeGenerator: () -> Unit,
+  onOpenLockDesigner: () -> Unit,
+  onOpenClonerVault: () -> Unit,
+  onOpenControlCenter: () -> Unit,
+  onReplayOnboarding: () -> Unit,
   onPickWallpaperPhoto: (Uri) -> Unit,
   onApplyWallpaperToSystem: (WallpaperTarget) -> Unit,
   onExtractThemeFromWallpaper: () -> Unit,
@@ -90,6 +110,12 @@ fun SettingsSectionDetailContent(
           Text(if (state.isDefaultHome) "Active Default Launcher ✓" else "Set as Default HOME Launcher")
         }
         Spacer(Modifier.height(10.dp))
+        SettingsSwitchRow("Enable Dynamic Capsule Bar", settings.dynamicCapsuleEnabled) { c ->
+          onUpdateSettings { it.copy(dynamicCapsuleEnabled = c) }
+        }
+        SettingsSwitchRow("Enable Swipe-Left Zero Screen", settings.zeroScreenEnabled) { c ->
+          onUpdateSettings { it.copy(zeroScreenEnabled = c) }
+        }
         Text("Grid Columns (${settings.gridColumns}) • Tablets adapt dynamically")
         Slider(
           value = settings.gridColumns.toFloat(),
@@ -224,8 +250,15 @@ fun SettingsSectionDetailContent(
         SettingsSwitchRow("Transparent Widget Mode", settings.defaultWidgetsTransparent) { c ->
           onUpdateSettings { it.copy(defaultWidgetsTransparent = c) }
         }
+        OutlinedTextField(
+          value = settings.weatherCityNote,
+          onValueChange = { txt -> onUpdateSettings { it.copy(weatherCityNote = txt) } },
+          label = { Text("Weather Widget City / Climate Note") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(8.dp))
-        Text("Quick-Add Built-in Widget to Current Page", style = MaterialTheme.typography.labelLarge)
+        Text("Quick-Add Built-in Atomic Widget (${CustomWidgetKind.entries.size} Total)", style = MaterialTheme.typography.labelLarge)
         CustomWidgetKind.entries.chunked(2).forEach { pair ->
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             pair.forEach { kind ->
@@ -314,9 +347,64 @@ fun SettingsSectionDetailContent(
           onValueChange = { v -> onUpdateSettings { it.copy(animationSpeed = v) } },
           valueRange = 0.5f..1.6f,
         )
+        HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
+        Spacer(Modifier.height(6.dp))
+        Text("Glass FX Studio Sliders", style = MaterialTheme.typography.titleSmall)
+        Text("Blur Strength (${(settings.glassBlurStrength * 100).toInt()}%)")
+        Slider(
+          value = settings.glassBlurStrength,
+          onValueChange = { v -> onUpdateSettings { it.copy(glassBlurStrength = v) } },
+          valueRange = 0f..1f,
+        )
+        Text("Surface Transparency (${(settings.glassTransparency * 100).toInt()}%)")
+        Slider(
+          value = settings.glassTransparency,
+          onValueChange = { v -> onUpdateSettings { it.copy(glassTransparency = v) } },
+          valueRange = 0.08f..0.75f,
+        )
+        Text("Specular Edge Reflection (${(settings.glassBorderReflection * 100).toInt()}%)")
+        Slider(
+          value = settings.glassBorderReflection,
+          onValueChange = { v -> onUpdateSettings { it.copy(glassBorderReflection = v) } },
+          valueRange = 0f..1f,
+        )
+        Text("Elevation & Shadow Depth (${(settings.glassShadowDepth * 100).toInt()}%)")
+        Slider(
+          value = settings.glassShadowDepth,
+          onValueChange = { v -> onUpdateSettings { it.copy(glassShadowDepth = v) } },
+          valueRange = 0f..1f,
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("Accent:", style = MaterialTheme.typography.labelLarge)
+          GlassAccentSwatches.forEach { (hex, _) ->
+            val selected = settings.customAccentHex == hex
+            Box(
+              modifier =
+                Modifier
+                  .size(28.dp)
+                  .clip(CircleShape)
+                  .background(if (hex != null) Color(hex) else Color(theme.palette.primaryHex))
+                  .border(if (selected) 2.5.dp else 1.dp, Color.White, CircleShape)
+                  .clickable { onUpdateSettings { it.copy(customAccentHex = hex) } },
+            )
+          }
+        }
       }
 
       SettingsSection.WALLPAPERS -> {
+        Button(
+          onClick = onOpenLockDesigner,
+          modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("settings_open_lock_designer_btn"),
+        ) {
+          Icon(Icons.Rounded.Lock, contentDescription = null)
+          Spacer(Modifier.width(8.dp))
+          Text("Open Lock Screen & AOD Designer")
+        }
+        Spacer(Modifier.height(10.dp))
         Text("Procedural Wallpaper Presets", style = MaterialTheme.typography.labelLarge)
         WallpaperStyle.entries.chunked(2).forEach { pair ->
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -372,10 +460,10 @@ fun SettingsSectionDetailContent(
         ) {
           Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
           Spacer(Modifier.width(8.dp))
-          Text("Open Algorithmic ThemeGenerator")
+          Text("Open Aether AI Architect")
         }
         Spacer(Modifier.height(10.dp))
-        Text("Built-In & Saved Offline Themes (${state.allThemes.size})", style = MaterialTheme.typography.labelLarge)
+        Text("Built-In & Saved Themes (${state.allThemes.size})", style = MaterialTheme.typography.labelLarge)
         state.allThemes.forEach { itemTheme ->
           val active = itemTheme.id == theme.id
           Surface(
@@ -406,6 +494,9 @@ fun SettingsSectionDetailContent(
           state = state,
           onUpdateSettings = onUpdateSettings,
           onToggleHiddenApp = onToggleHiddenApp,
+          onOpenControlCenter = onOpenControlCenter,
+          onOpenClonerVault = onOpenClonerVault,
+          onReplayOnboarding = onReplayOnboarding,
           onClearSearchHistory = onClearSearchHistory,
           onExportBackup = onExportBackup,
           onImportBackup = onImportBackup,

@@ -32,6 +32,9 @@ internal fun SystemAndInteractionSectionContent(
   state: LauncherUiState,
   onUpdateSettings: ((LauncherSettings) -> LauncherSettings) -> Unit,
   onToggleHiddenApp: (String, Boolean) -> Unit,
+  onOpenControlCenter: () -> Unit,
+  onOpenClonerVault: () -> Unit,
+  onReplayOnboarding: () -> Unit,
   onClearSearchHistory: () -> Unit,
   onExportBackup: () -> Unit,
   onImportBackup: () -> Unit,
@@ -48,6 +51,15 @@ internal fun SystemAndInteractionSectionContent(
 
   when (section) {
     SettingsSection.GESTURES -> {
+      Button(
+        onClick = onOpenControlCenter,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("settings_open_cc_btn"),
+      ) {
+        Icon(Icons.Rounded.Tune, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("Open Control Center & Customize Tiles")
+      }
+      Spacer(Modifier.height(8.dp))
       GesturePickerRow("Swipe Up", settings.swipeUpAction) { a ->
         onUpdateSettings { it.copy(swipeUpAction = a) }
       }
@@ -176,10 +188,19 @@ internal fun SystemAndInteractionSectionContent(
     }
 
     SettingsSection.PRIVACY -> {
+      Button(
+        onClick = onOpenClonerVault,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("settings_open_vault_btn"),
+      ) {
+        Icon(Icons.Rounded.Security, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("Open Cloner Vault & App Lock (${settings.lockedPackages.size} Locked)")
+      }
+      Spacer(Modifier.height(10.dp))
       Text(
-        "• Zero API keys, zero cloud accounts, zero telemetry.\n" +
-          "• All layouts, usage counts, search history, and themes stay on this device.\n" +
-          "• Hiding an app removes it from the launcher view only—it does NOT encrypt, lock, or uninstall the app.",
+        "• Core launcher layouts, usage counts, search history, and Vault PIN hashes stay local on-device.\n" +
+          "• Gemini AI Architect uses Firebase AI Logic + App Check only when you ask a question or request Gemini themes.\n" +
+          "• Hiding or locking an app inside Aether Glass does NOT encrypt or block external Android system launchers.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
@@ -332,13 +353,22 @@ internal fun SystemAndInteractionSectionContent(
     }
 
     SettingsSection.ABOUT -> {
-      Text("Theme Studio — ColorOS 7 Inspired Launcher", style = MaterialTheme.typography.titleMedium)
+      Text("Aether Glass OS — Liquid Glass Android Launcher", style = MaterialTheme.typography.titleMedium)
       Spacer(Modifier.height(4.dp))
       Text(
-        "100% Offline-First • Zero API Keys • Zero Cloud Dependencies • Zero Telemetry",
+        "Liquid Glass UX • Firebase AI Logic (Zero Exposed Keys) • Real Android System Integrations",
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.primary,
       )
+      Spacer(Modifier.height(10.dp))
+      OutlinedButton(
+        onClick = onReplayOnboarding,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("replay_onboarding_btn"),
+      ) {
+        Icon(Icons.Rounded.Replay, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("Replay Welcome Setup Flow")
+      }
       Spacer(Modifier.height(10.dp))
       Surface(
         shape = RoundedCornerShape(12.dp),

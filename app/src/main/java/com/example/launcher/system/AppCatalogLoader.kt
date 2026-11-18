@@ -62,25 +62,58 @@ object AppCatalogLoader {
         }
 
       val selfPkg = context.packageName
-      resolved
-        .asSequence()
-        .filter { it.activityInfo != null && it.activityInfo.packageName != selfPkg }
-        .map { ri ->
-          val ai = ri.activityInfo
-          val appInfo = ai.applicationInfo
-          val label = ri.loadLabel(pm)?.toString()?.trim().orEmpty().ifEmpty { ai.packageName }
-          val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-          InstalledAppInfo(
-            packageName = ai.packageName,
-            activityName = ai.name,
-            label = label,
-            category = classifyApp(appInfo, ai.packageName, label),
-            isSystemApp = isSys,
-          )
+      val workProfileApps =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          runCatching {
+            val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+            val selfHandle = Process.myUserHandle()
+            la?.profiles
+              ?.filter { it != selfHandle }
+              ?.flatMap { profile ->
+                la.getActivityList(null, profile).orEmpty().mapNotNull { info ->
+                  val comp = info.componentName
+                  if (comp.packageName == selfPkg) return@mapNotNull null
+                  val appInfo = info.applicationInfo
+                  val label = info.label?.toString()?.trim().orEmpty().ifEmpty { comp.packageName }
+                  InstalledAppInfo(
+                    packageName = comp.packageName,
+                    activityName = comp.className,
+                    label = "$label (Work)",
+                    category = classifyApp(appInfo, comp.packageName, label),
+                    isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0,
+                    isWorkProfile = true,
+                  )
+                }
+              }
+              .orEmpty()
+          }.getOrDefault(emptyList())
+        } else {
+          emptyList()
         }
-        .distinctBy { it.componentKey }
+
+      val primaryApps =
+        resolved
+          .asSequence()
+          .filter { it.activityInfo != null && it.activityInfo.packageName != selfPkg }
+          .map { ri ->
+            val ai = ri.activityInfo
+            val appInfo = ai.applicationInfo
+            val label = ri.loadLabel(pm)?.toString()?.trim().orEmpty().ifEmpty { ai.packageName }
+            val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            InstalledAppInfo(
+              packageName = ai.packageName,
+              activityName = ai.name,
+              label = label,
+              category = classifyApp(appInfo, ai.packageName, label),
+              isSystemApp = isSys,
+              isWorkProfile = false,
+            )
+          }
+          .toList()
+
+      (primaryApps + workProfileApps)
+        .distinctBy { "${it.componentKey}:${it.isWorkProfile}" }
         .sortedBy { it.label.lowercase() }
-        .toList()
     }
 
   suspend fun loadAppIcon(
@@ -129,6 +162,21 @@ object AppCatalogLoader {
           false
         }
       }.getOrDefault(false)
+    }
+  }
+
+  fun launchInstalledApp(context: Context, app: InstalledAppInfo): Boolean {
+    if (!app.isWorkProfile || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return launchApp(context, app.packageName, app.activityName)
+    }
+    return runCatching {
+      val la = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps ?: return false
+      val selfHandle = Process.myUserHandle()
+      val workProfile = la.profiles.firstOrNull { it != selfHandle } ?: return false
+      la.startMainActivity(ComponentName(app.packageName, app.activityName), workProfile, null, null)
+      true
+    }.getOrElse {
+      launchApp(context, app.packageName, app.activityName)
     }
   }
 

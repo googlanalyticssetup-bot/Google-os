@@ -1,6 +1,6 @@
 {
-  "name": "Theme Studio",
-  "description": "Offline-first AI theme, wallpaper, icon, glass effect, and widget personalisation studio for Android phones, tablets, and foldables with zero API keys.",
+  "name": "Aether Glass",
+  "description": "Aether Glass OS: Liquid Glass Android launcher with Fluid Motion, Control Center, Zero Screen, Dynamic Capsule, Atomic Widgets, Cloner Vault, and Gemini AI Architect.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

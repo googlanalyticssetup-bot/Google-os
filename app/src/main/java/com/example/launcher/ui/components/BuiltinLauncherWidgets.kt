@@ -40,6 +40,9 @@ import com.example.domain.model.DeviceCapabilities
 import com.example.domain.model.EffectiveRenderRules
 import com.example.domain.model.ThemeSpec
 import com.example.launcher.model.*
+import com.example.launcher.system.ActiveMediaTrack
+import com.example.launcher.system.ControlCenterSystemController
+import com.example.launcher.system.ControlCenterSystemSnapshot
 import com.example.launcher.system.LauncherWidgetHostHolder
 import com.example.ui.components.GlassSurfaceCard
 import com.example.ui.components.fontStyleToFamily
@@ -64,6 +67,10 @@ fun LauncherHomeWidgetCard(
   onUpdateItem: (HomeItem) -> Unit,
   onRemoveItem: () -> Unit,
   modifier: Modifier = Modifier,
+  ccSnapshot: ControlCenterSystemSnapshot = ControlCenterSystemSnapshot(),
+  activeMedia: ActiveMediaTrack? = null,
+  totalLaunches: Int = 0,
+  onOpenClonerVault: () -> Unit = {},
 ) {
   val context = LocalContext.current
   val primary = Color(theme.palette.primaryHex)
@@ -228,11 +235,21 @@ fun LauncherHomeWidgetCard(
                 Text("Local Climate", fontFamily = fontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
               }
               Text(
-                "Offline Widget • Add system weather widget via Edit Mode",
+                text = settings.weatherCityNote,
                 fontFamily = fontFamily,
-                fontSize = 11.sp,
-                color = onSurface.copy(alpha = 0.75f),
-                maxLines = 2,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+              Text(
+                "Customize note in Settings or add system weather widget",
+                fontFamily = fontFamily,
+                fontSize = 10.sp,
+                color = onSurface.copy(alpha = 0.72f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
               )
             }
           }
@@ -247,12 +264,12 @@ fun LauncherHomeWidgetCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                   Icon(Icons.Rounded.BatteryChargingFull, contentDescription = null, tint = primary, modifier = Modifier.size(18.dp))
                   Spacer(Modifier.width(4.dp))
-                  Text("${capabilities.batteryPercent}%", fontFamily = fontFamily, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = onSurface)
+                  Text("${ccSnapshot.batteryPercent}%", fontFamily = fontFamily, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = onSurface)
                 }
                 Text(rules.tier.label, fontFamily = fontFamily, fontSize = 10.sp, color = secondary)
               }
               LinearProgressIndicator(
-                progress = { capabilities.batteryPercent / 100f },
+                progress = { ccSnapshot.batteryPercent / 100f },
                 color = primary,
                 trackColor = onSurface.copy(alpha = 0.16f),
                 modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
@@ -281,8 +298,23 @@ fun LauncherHomeWidgetCard(
                 }
                 Spacer(Modifier.width(10.dp))
                 Column {
-                  Text("Media Controller", fontFamily = fontFamily, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = onSurface)
-                  Text("System Audio Controls", fontFamily = fontFamily, fontSize = 11.sp, color = onSurface.copy(alpha = 0.75f))
+                  Text(
+                    text = activeMedia?.title ?: "Media Controller",
+                    fontFamily = fontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                  Text(
+                    text = activeMedia?.artist ?: "System Audio Controls",
+                    fontFamily = fontFamily,
+                    fontSize = 11.sp,
+                    color = onSurface.copy(alpha = 0.75f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
                 }
               }
               Row {
@@ -290,7 +322,11 @@ fun LauncherHomeWidgetCard(
                   Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous track", tint = onSurface)
                 }
                 IconButton(onClick = { dispatchMediaKey(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) }) {
-                  Icon(Icons.Rounded.PlayArrow, contentDescription = "Play or pause", tint = primary)
+                  Icon(
+                    imageVector = if (activeMedia?.isPlaying == true) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = "Play or pause",
+                    tint = primary,
+                  )
                 }
                 IconButton(onClick = { dispatchMediaKey(context, KeyEvent.KEYCODE_MEDIA_NEXT) }) {
                   Icon(Icons.Rounded.SkipNext, contentDescription = "Next track", tint = onSurface)
@@ -372,6 +408,28 @@ fun LauncherHomeWidgetCard(
                 overflow = TextOverflow.Ellipsis,
               )
             }
+          }
+
+          CustomWidgetKind.ANALOG_CLOCK,
+          CustomWidgetKind.STORAGE,
+          CustomWidgetKind.WELLNESS,
+          CustomWidgetKind.AI_WORKSPACE,
+          CustomWidgetKind.DUAL_SPACE,
+          -> {
+            RenderExtendedAtomicWidget(
+              kind = kind,
+              snap = ccSnapshot,
+              totalLaunches = totalLaunches,
+              lockedCount = settings.lockedPackages.size,
+              webAppCount = settings.isolatedWebApps.size,
+              primary = primary,
+              secondary = secondary,
+              onSurface = onSurface,
+              fontFamily = fontFamily,
+              onOpenThemeGenerator = onOpenThemeGenerator,
+              onOpenClonerVault = onOpenClonerVault,
+              onOpenUsageSettings = { ControlCenterSystemController.openUsageAccessSettings(context) },
+            )
           }
         }
       }

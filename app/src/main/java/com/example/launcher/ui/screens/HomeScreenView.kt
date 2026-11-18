@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -71,6 +72,12 @@ fun HomeScreenView(
   onRemoveLastPage: () -> Unit,
   onOpenThemeGenerator: () -> Unit,
   onOpenSettings: (SettingsSection?) -> Unit,
+  onOpenControlCenter: () -> Unit,
+  onOpenZeroScreen: () -> Unit,
+  onOpenClonerVault: () -> Unit,
+  onToggleCapsuleExpand: () -> Unit,
+  onToggleStopwatch: () -> Unit,
+  onResetStopwatch: () -> Unit,
   onShowMessage: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -181,13 +188,37 @@ fun HomeScreenView(
               onDragEnd = {
                 if (accumulatedDrag < -80f) {
                   onTriggerGesture(settings.swipeUpAction)
-                } else if (accumulatedDrag > 90f) {
+                } else if (accumulatedDrag > 80f) {
                   onTriggerGesture(settings.swipeDownAction)
+                }
+              },
+            )
+          }
+          .pointerInput(settings.zeroScreenEnabled, pagerState.currentPage, settings.pageCount) {
+            var accumX = 0f
+            detectHorizontalDragGestures(
+              onDragStart = { accumX = 0f },
+              onHorizontalDrag = { _, dragAmount -> accumX += dragAmount },
+              onDragEnd = {
+                if (settings.zeroScreenEnabled && accumX < -110f && pagerState.currentPage == (settings.pageCount - 1).coerceAtLeast(0)) {
+                  onOpenZeroScreen()
                 }
               },
             )
           },
     ) {
+      if (settings.dynamicCapsuleEnabled && !state.isEditMode) {
+        DynamicCapsuleBar(
+          state = state,
+          onToggleExpand = onToggleCapsuleExpand,
+          onToggleStopwatch = onToggleStopwatch,
+          onResetStopwatch = onResetStopwatch,
+          onOpenControlCenter = onOpenControlCenter,
+          onOpenZeroScreen = onOpenZeroScreen,
+          onOpenAiArchitect = onOpenThemeGenerator,
+        )
+      }
+
       // Optional top Home Search Bar
       if (settings.searchBarStyle != SearchBarStyle.HIDDEN && !state.isEditMode) {
         HomeTopSearchBar(
@@ -283,6 +314,7 @@ fun HomeScreenView(
           verticalArrangement = Arrangement.spacedBy(settings.iconSpacingDp.dp),
         ) {
           // Placed Widgets on this page
+          val totalLaunches = remember(state.installedApps) { state.installedApps.sumOf { it.launchCount } }
           widgets.forEach { widgetItem ->
             val widgetHeight = if (widgetItem.spanY >= 2) 136.dp else 86.dp
             LauncherHomeWidgetCard(
@@ -297,6 +329,10 @@ fun HomeScreenView(
               onOpenThemeGenerator = onOpenThemeGenerator,
               onUpdateItem = onUpdateHomeItem,
               onRemoveItem = { onRemoveHomeItem(widgetItem) },
+              ccSnapshot = state.controlCenterSnapshot,
+              activeMedia = state.activeMedia,
+              totalLaunches = totalLaunches,
+              onOpenClonerVault = onOpenClonerVault,
               modifier =
                 Modifier
                   .fillMaxWidth(
@@ -391,12 +427,24 @@ fun HomeScreenView(
         }
       }
 
-      // Page Indicator Dots
+      // Page Indicator Dots + Zero Screen / Control Center quick pills
       Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
       ) {
+        if (settings.zeroScreenEnabled) {
+          Text(
+            text = "Zero",
+            fontSize = 11.sp,
+            color = onSurface.copy(alpha = 0.72f),
+            modifier =
+              Modifier
+                .clip(RoundedCornerShape(50))
+                .clickable { onOpenZeroScreen() }
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+          )
+        }
         repeat(settings.pageCount) { idx ->
           val active = idx == pagerState.currentPage
           Box(
@@ -409,6 +457,16 @@ fun HomeScreenView(
                 .clickable { scope.launch { pagerState.animateScrollToPage(idx) } },
           )
         }
+        Text(
+          text = "Control",
+          fontSize = 11.sp,
+          color = primary.copy(alpha = 0.88f),
+          modifier =
+            Modifier
+              .clip(RoundedCornerShape(50))
+              .clickable { onOpenControlCenter() }
+              .padding(horizontal = 8.dp, vertical = 2.dp),
+        )
       }
 
       // Edit Mode Action Dock vs Normal Home Dock
@@ -424,11 +482,12 @@ fun HomeScreenView(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             EditToolChip("Widgets", Icons.Rounded.Widgets) { showWidgetPicker = true }
-            EditToolChip("ThemeGen", Icons.Rounded.AutoAwesome, onOpenThemeGenerator)
+            EditToolChip("AI Architect", Icons.Rounded.AutoAwesome, onOpenThemeGenerator)
+            EditToolChip("Control Center", Icons.Rounded.Tune, onOpenControlCenter)
+            EditToolChip("Cloner Vault", Icons.Rounded.Security, onOpenClonerVault)
             EditToolChip("Wallpaper", Icons.Rounded.Wallpaper) { onOpenSettings(SettingsSection.WALLPAPERS) }
             EditToolChip("Icons", Icons.Rounded.Apps) { onOpenSettings(SettingsSection.ICONS) }
             EditToolChip("Grid & Dock", Icons.Rounded.GridView) { onOpenSettings(SettingsSection.HOME_SCREEN) }
-            EditToolChip("Transitions", Icons.Rounded.Animation) { onOpenSettings(SettingsSection.ANIMATIONS) }
             EditToolChip("Settings", Icons.Rounded.Settings) { onOpenSettings(null) }
           }
         }

@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import com.example.ai.configureAppCheck
 import com.example.launcher.system.LauncherWidgetHostHolder
 import com.example.launcher.ui.LauncherAppRoot
 import com.example.launcher.ui.LauncherDestination
@@ -19,6 +20,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    configureAppCheck(this, intent)
     enableEdgeToEdge()
     widgetHostHolder = LauncherWidgetHostHolder(applicationContext)
     setContent {
@@ -50,9 +52,13 @@ class MainActivity : ComponentActivity() {
     super.onNewIntent(intent)
     if (Intent.ACTION_MAIN == intent.action && intent.hasCategory(Intent.CATEGORY_HOME)) {
       viewModel.openDrawer(false)
+      viewModel.openControlCenter(false)
+      viewModel.openZeroScreen(false)
       viewModel.setEditMode(false)
       viewModel.openFolder(null)
-      viewModel.navigateTo(LauncherDestination.HOME)
+      if (viewModel.uiState.value.settings.onboardingCompleted) {
+        viewModel.navigateTo(LauncherDestination.HOME)
+      }
       viewModel.setCurrentPage(0)
     }
   }
