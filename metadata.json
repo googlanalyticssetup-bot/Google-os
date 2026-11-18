@@ -1,0 +1,6 @@
+{
+  "name": "Theme Studio",
+  "description": "Offline-first AI theme, wallpaper, icon, glass effect, and widget personalisation studio for Android phones, tablets, and foldables with zero API keys.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
